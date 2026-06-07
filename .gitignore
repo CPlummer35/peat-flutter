@@ -1,0 +1,42 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
+/pubspec.lock
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+/build/
+/coverage/
+
+# peat-ffi native build artifacts (produced by build-*.sh / justfile tasks)
+# These are NOT committed; rebuild from source or fetch from CI release artifacts.
+android/src/main/jniLibs/
+ios/Frameworks/
+macos/Frameworks/
+
+# Note: lib/src/generated/ and lib/src/proto/ ARE committed so that pub.dev
+# consumers do not need the Rust/uniffi-bindgen-dart/protoc toolchain.
