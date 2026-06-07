@@ -1,0 +1,22 @@
+PODS:
+  - Flutter (1.0.0)
+  - peat_flutter (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - peat_flutter (from `.symlinks/plugins/peat_flutter/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  peat_flutter:
+    :path: ".symlinks/plugins/peat_flutter/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  peat_flutter: 68668a144721f044f63b420ceaf39678fbbf31e9
+
+PODFILE CHECKSUM: c2c51e96deecd527c95b3ef8373882126b77b7ee
+
+COCOAPODS: 1.16.2

@@ -16,6 +16,7 @@ PEAT_DIR="${PEAT_WORKSPACE_DIR:-"${SCRIPT_DIR}/../../peat"}"
 FRAMEWORKS_DIR="${SCRIPT_DIR}/Frameworks"
 FEATURES="sync,bluetooth"
 MANIFEST="${PEAT_DIR}/Cargo.toml"
+export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-16.0}"
 
 echo "==> Building peat-ffi for aarch64-apple-ios (device)"
 cargo build --release \
@@ -42,23 +43,16 @@ echo "==> Lipo-ing simulator slices"
 SIM_LIPO_DIR="${FRAMEWORKS_DIR}/sim-lipo"
 mkdir -p "${SIM_LIPO_DIR}"
 lipo -create \
-    "${PEAT_DIR}/target/aarch64-apple-ios-sim/release/libpeat_ffi.a" \
-    "${PEAT_DIR}/target/x86_64-apple-ios/release/libpeat_ffi.a" \
-    -output "${SIM_LIPO_DIR}/libpeat_ffi.a"
+    "${PEAT_DIR}/target/aarch64-apple-ios-sim/release/libpeat_ffi.dylib" \
+    "${PEAT_DIR}/target/x86_64-apple-ios/release/libpeat_ffi.dylib" \
+    -output "${SIM_LIPO_DIR}/libpeat_ffi.dylib"
 
 echo "==> Creating PeatFFI.xcframework"
-# Empty headers dirs satisfy xcodebuild -create-xcframework for static libs.
-DEVICE_HDR="${FRAMEWORKS_DIR}/device-include"
-SIM_HDR="${FRAMEWORKS_DIR}/sim-include"
-mkdir -p "${DEVICE_HDR}" "${SIM_HDR}"
-
 XCFRAMEWORK="${FRAMEWORKS_DIR}/PeatFFI.xcframework"
 rm -rf "${XCFRAMEWORK}"
 xcodebuild -create-xcframework \
-    -library "${PEAT_DIR}/target/aarch64-apple-ios/release/libpeat_ffi.a" \
-    -headers "${DEVICE_HDR}" \
-    -library "${SIM_LIPO_DIR}/libpeat_ffi.a" \
-    -headers "${SIM_HDR}" \
+    -library "${PEAT_DIR}/target/aarch64-apple-ios/release/libpeat_ffi.dylib" \
+    -library "${SIM_LIPO_DIR}/libpeat_ffi.dylib" \
     -output "${XCFRAMEWORK}"
 
 echo "==> Built ${XCFRAMEWORK}"

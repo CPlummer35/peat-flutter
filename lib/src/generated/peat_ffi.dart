@@ -4192,7 +4192,7 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      return (returnBuf + 0).ref.u64;
+      return PeatNodeFfiCodec.lift((returnBuf + 0).ref.u64);
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -7290,7 +7290,7 @@ class PeatFfiFfi {
         }
       }
       (argBuf + 0).ref.u64 = clonedHandle;
-      (argBuf + 1).ref.u64 = callback;
+      (argBuf + 1).ref.u64 = _DocumentCallbackCallbackBridge.instance.register(callback);
       _peatNodeSubscribeFfiBuffer(argBuf, returnBuf);
       final int statusCode = (returnBuf + 1).ref.i8;
       if (statusCode != _uniFfiRustCallStatusSuccess) {
