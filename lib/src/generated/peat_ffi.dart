@@ -4562,7 +4562,18 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (all_peer_transport_states)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <PeerTransportState>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadPeerTransportState(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -4723,7 +4734,18 @@ class PeatFfiFfi {
         rustRetBufferPtrs.add(errBufPtr);
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (connected_peers)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <String>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_seqReader.readString()); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5013,7 +5035,14 @@ class PeatFfiFfi {
         rustRetBufferPtrs.add(errBufPtr);
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (endpoint_addr)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      return utf8.decode(retBytes);
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5076,7 +5105,17 @@ class PeatFfiFfi {
         rustRetBufferPtrs.add(errBufPtr);
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (endpoint_socket_addr)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _optReader = _UniFfiBinaryReader(retBytes);
+      final int _optTag = _optReader.readI8();
+      if (_optTag == 0) return null;
+      return _optReader.readString();
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5174,7 +5213,17 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_cell)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _optReader = _UniFfiBinaryReader(retBytes);
+      final int _optTag = _optReader.readI8();
+      if (_optTag == 0) return null;
+      return _uniffiReadCellInfo(_optReader);
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5241,7 +5290,18 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_cells)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <CellInfo>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadCellInfo(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5308,7 +5368,18 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_commands)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <CommandInfo>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadCommandInfo(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5437,7 +5508,17 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_document)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _optReader = _UniFfiBinaryReader(retBytes);
+      final int _optTag = _optReader.readI8();
+      if (_optTag == 0) return null;
+      return _optReader.readString();
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5504,7 +5585,18 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_markers)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <MarkerInfo>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadMarkerInfo(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5571,7 +5663,18 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_nodes)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <NodeInfo>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadNodeInfo(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5669,7 +5772,17 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_track)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _optReader = _UniFfiBinaryReader(retBytes);
+      final int _optTag = _optReader.readI8();
+      if (_optTag == 0) return null;
+      return _uniffiReadTrackInfo(_optReader);
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5736,7 +5849,18 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (get_tracks)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <TrackInfo>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadTrackInfo(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5865,7 +5989,17 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (ingest_inbound_frame)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _optReader = _UniFfiBinaryReader(retBytes);
+      final int _optTag = _optReader.readI8();
+      if (_optTag == 0) return null;
+      return _optReader.readString();
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -5963,7 +6097,18 @@ class PeatFfiFfi {
         }
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (list_documents)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <String>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_seqReader.readString()); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -6026,7 +6171,14 @@ class PeatFfiFfi {
         rustRetBufferPtrs.add(errBufPtr);
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (node_id)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      return utf8.decode(retBytes);
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -6257,7 +6409,18 @@ class PeatFfiFfi {
         rustRetBufferPtrs.add(errBufPtr);
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (poll_outbound_frames)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <OutboundFrame>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadOutboundFrame(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {
@@ -7779,7 +7942,18 @@ class PeatFfiFfi {
         rustRetBufferPtrs.add(errBufPtr);
         throw StateError('UniFFI ffibuffer call failed with status $statusCode');
       }
-      throw UnsupportedError('runtime invocation for this UniFFI ABI (RustCallStatus out-arg) is not implemented yet (poll_changes)');
+      final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+      retBufPtr.ref
+        ..capacity = (returnBuf + 0).ref.u64
+        ..len = (returnBuf + 1).ref.u64
+        ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+      rustRetBufferPtrs.add(retBufPtr);
+      final Uint8List retBytes = retBufPtr.ref.len == 0 ? Uint8List(0) : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+      final _seqReader = _UniFfiBinaryReader(retBytes);
+      final int _seqLen = _seqReader.readI32();
+      final _seqOut = <DocumentChange>[];
+      for (var _i = 0; _i < _seqLen; _i++) { _seqOut.add(_uniffiReadDocumentChange(_seqReader)); }
+      return _seqOut;
     } finally {
       for (final ptr in foreignArgPtrs) {
         if (ptr != ffi.nullptr) {

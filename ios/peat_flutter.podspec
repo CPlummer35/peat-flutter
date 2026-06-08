@@ -14,15 +14,16 @@ Pod::Spec.new do |s|
   s.source           = { :path => '.' }
   s.platform         = :ios, '16.0'
 
-  # Pre-built xcframework containing:
+  # Pre-built static xcframework containing:
   #   aarch64-apple-ios          (device)
   #   lipo(aarch64-apple-ios-sim + x86_64-apple-ios)  (simulator)
-  # Produced by ios/build-rust.sh.
+  # Produced by ios/build-rust.sh (staticlib crate-type).
   s.vendored_frameworks = 'Frameworks/PeatFFI.xcframework'
 
   s.dependency 'Flutter'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
+    'OTHER_LDFLAGS' => '-lc++ -lresolv'
   }
 end
