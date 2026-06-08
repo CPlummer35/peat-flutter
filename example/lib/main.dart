@@ -46,13 +46,19 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   SyncStats? _syncStats;
   Timer? _peerTimer;
 
-  // Shared CRDT counter — persists across node start/stop
-  // When offline, +/- edits are buffered locally and flushed on reconnect.
+  // PN-Counter CRDT: each node maintains its own (inc, dec) slot so
+  // offline edits from multiple nodes merge additively on reconnect.
+  // Total = Σ (inc_i - dec_i) across all nodes.
   static const _counterCollection = 'demo';
-  static const _counterDocId = 'counter';
-  int _counterValue = 0;
+  // My own slot key — unique per node: "counter-macOS·H42" etc.
+  String get _myCounterDoc => 'counter-${_hostName.replaceAll(' ', '_').replaceAll('·', '-')}';
+  int _myInc = 0;
+  int _myDec = 0;
+  bool _counterDirty = false; // local edits not yet flushed to store
+  // Contributions from peers: docId → (inc - dec)
+  final Map<String, int> _peerContributions = {};
+  int get _counterValue => (_myInc - _myDec) + _peerContributions.values.fold(0, (a, b) => a + b);
   String? _counterLastBy;
-  bool _counterDirty = false; // local edits made while offline
   Timer? _counterTimer;
   StreamSubscription<DocumentChange>? _changeSub;
   StreamSubscription<OutboundFrame>? _outboundSub;
@@ -92,7 +98,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       ));
       node.startSync();
 
-      // On connect: flush any offline edits, or pull peer's latest value.
+      // On connect: flush offline edits + read peer contributions.
       _refreshCounter(node);
       _counterTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
         if (!mounted || _node == null) return;
@@ -109,6 +115,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
 
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
+        // Filter internal counter docs — the counter UI handles those.
+        if (change.docId.startsWith('counter-') || change.docId == 'counter') return;
         setState(() {
           _changeLog.insert(
             0,
@@ -136,41 +144,63 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   }
 
   void _refreshCounter(PeatFlutterNode node) {
+    // Flush local dirty edits first (offline changes take precedence).
     if (_counterDirty) {
-      // Flush local edits made while offline before accepting peer values.
-      _writeCounter(node, _counterValue);
-      return;
+      _flushMyCounter(node);
     }
-    final raw = node.getRaw(_counterCollection, _counterDocId);
-    if (raw == null) {
-      // Nothing in the mesh yet — publish our local value.
-      _writeCounter(node, _counterValue);
-      return;
-    }
-    try {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      final v = map['value'] as int? ?? 0;
-      final by = map['by'] as String?;
-      if (mounted && (v != _counterValue || by != _counterLastBy)) {
-        setState(() {
-          _counterValue = v;
-          _counterLastBy = by;
-        });
+    // Read all counter docs to collect peer contributions.
+    final docs = node.listDocuments(_counterCollection);
+    final updated = <String, int>{};
+    for (final docId in docs) {
+      if (!docId.startsWith('counter-')) continue;
+      if (docId == _myCounterDoc) {
+        // Restore my own state if we don't have it yet.
+        if (_myInc == 0 && _myDec == 0 && !_counterDirty) {
+          try {
+            final raw = node.getRaw(_counterCollection, docId);
+            if (raw != null) {
+              final map = jsonDecode(raw) as Map<String, dynamic>;
+              if (mounted) setState(() {
+                _myInc = map['inc'] as int? ?? 0;
+                _myDec = map['dec'] as int? ?? 0;
+              });
+            }
+          } catch (_) {}
+        }
+        continue;
       }
-    } catch (_) {}
+      try {
+        final raw = node.getRaw(_counterCollection, docId);
+        if (raw != null) {
+          final map = jsonDecode(raw) as Map<String, dynamic>;
+          updated[docId] = (map['inc'] as int? ?? 0) - (map['dec'] as int? ?? 0);
+        }
+      } catch (_) {}
+    }
+    if (mounted && updated != _peerContributions) {
+      setState(() => _peerContributions
+        ..clear()
+        ..addAll(updated));
+    }
   }
 
-  void _writeCounter(PeatFlutterNode? node, int value) {
+  void _flushMyCounter(PeatFlutterNode node) {
+    final json = jsonEncode({'inc': _myInc, 'dec': _myDec, 'by': _hostName});
+    node.publishRaw(_counterCollection, json, docId: _myCounterDoc);
     setState(() {
-      _counterValue = value;
+      _counterDirty = false;
+      _counterLastBy = _hostName;
+    });
+  }
+
+  void _writeCounter(PeatFlutterNode? node, bool increment) {
+    setState(() {
+      if (increment) _myInc++; else _myDec++;
       _counterLastBy = _hostName;
     });
     if (node != null) {
-      final json = jsonEncode({'value': value, 'by': _hostName});
-      node.publishRaw(_counterCollection, json, docId: _counterDocId);
-      setState(() => _counterDirty = false);
+      _flushMyCounter(node);
     } else {
-      // Offline — mark dirty so we flush on next connect.
       setState(() => _counterDirty = true);
     }
   }
@@ -235,7 +265,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     _peerTimer?.cancel();
     _counterTimer?.cancel();
     try { _node?.dispose(); } catch (_) {}
-    Future.delayed(const Duration(milliseconds: 800), () {
+    Future.delayed(const Duration(seconds: 5), () {
       if (mounted) setState(() => _stopping = false);
     });
     setState(() {
@@ -248,8 +278,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _peers = [];
       _syncStats = null;
       _counterLastBy = null;
-      _stopping = false; // reset handled by Future.delayed above
-      // Keep _counterValue and _counterDirty so offline edits persist.
+      _stopping = false;
+      // Keep _myInc/_myDec/_counterDirty/_peerContributions so offline
+      // edits and peer values persist across stop/start cycles.
       _bleRunning = false;
       _bleFrameCount = 0;
     });
@@ -386,7 +417,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                         IconButton.filledTonal(
                           icon: const Icon(Icons.remove),
                           iconSize: 28,
-                          onPressed: () => _writeCounter(_node, _counterValue - 1),
+                          onPressed: () => _writeCounter(_node, false),
                         ),
                         const SizedBox(width: 24),
                         Text(
@@ -398,7 +429,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                         IconButton.filledTonal(
                           icon: const Icon(Icons.add),
                           iconSize: 28,
-                          onPressed: () => _writeCounter(_node, _counterValue + 1),
+                          onPressed: () => _writeCounter(_node, true),
                         ),
                       ],
                     ),
