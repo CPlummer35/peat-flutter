@@ -108,6 +108,10 @@ class PeatFlutterNode {
   /// All nodes known to the mesh (including this one).
   List<NodeInfo> get nodes => _node.getNodes();
 
+  /// Remove a stale node entry from the local store.
+  void deleteNode(String nodeId) =>
+      _node.deleteDocument('nodes', nodeId);
+
   /// Number of currently connected peers.
   int get peerCount => _node.peerCount();
 

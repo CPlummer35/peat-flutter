@@ -167,10 +167,11 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
 
       _peerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
         if (!mounted || _node == null) return;
+        final seen = <String>{};
         setState(() {
           _peers = _node!.connectedPeers;
           _syncStats = _node!.syncStats;
-          _roster = _node!.nodes;
+          _roster = _node!.nodes.where((n) => seen.add(n.id)).toList();
         });
       });
 
@@ -262,12 +263,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   }
 
   void _publishSelf(PeatFlutterNode node) {
-    // Use node.nodeId directly (not _nodeId which may not be set yet).
-    node.publishSelf(
-      nodeId: node.nodeId,
-      name: _hostName,
-      capabilities: _myCapabilities,
-    );
+    final id = node.nodeId;
+    // Delete any stale entries with the same hostname but a different ID
+    // (e.g. leftover 'unknown' entries from a previous session).
+    for (final stale in node.nodes.where((n) => n.name == _hostName && n.id != id)) {
+      try { node.deleteNode(stale.id); } catch (_) {}
+    }
+    node.publishSelf(nodeId: id, name: _hostName, capabilities: _myCapabilities);
   }
 
   void _refreshCounter(PeatFlutterNode node) {
