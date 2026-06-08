@@ -50,7 +50,7 @@ class PeatExampleApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'peat_flutter example',
+      title: 'peat-water',
       theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
       darkTheme: ThemeData(
         colorSchemeSeed: Colors.indigo,
@@ -174,9 +174,11 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         setState(() {
           _peers = _node!.connectedPeers;
           _syncStats = _node!.syncStats;
-          // Filter out trivially invalid IDs (e.g. 'unknown') and dedup.
+          // Show only self + currently connected peers.
+          // Historical/ghost entries from synced stores are excluded.
+          final validIds = {_nodeId, ..._peers};
           _roster = _node!.nodes
-              .where((n) => n.id.length >= 16 && seen.add(n.id))
+              .where((n) => n.id.length >= 16 && validIds.contains(n.id) && seen.add(n.id))
               .toList();
         });
       });
@@ -489,8 +491,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       length: 2,
       child: Scaffold(
       appBar: AppBar(
-        title: const Text('peat_flutter example'),
         backgroundColor: theme.colorScheme.inversePrimary,
+        toolbarHeight: 0, // hide the title bar entirely; tabs speak for themselves
         bottom: const TabBar(
           tabs: [
             Tab(icon: Icon(Icons.water_drop), text: 'Operations'),
@@ -606,9 +608,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         IconButton.filledTonal(
-                          icon: const Icon(Icons.water_drop_outlined),
+                          icon: const Icon(Icons.remove_circle_outline),
                           iconSize: 28,
-                          tooltip: 'Consume (-1L)',
+                          tooltip: 'Consume 1L',
                           onPressed: () => _writeCounter(_node, false),
                         ),
                         const SizedBox(width: 24),
@@ -626,9 +628,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                         ),
                         const SizedBox(width: 24),
                         IconButton.filledTonal(
-                          icon: const Icon(Icons.add),
+                          icon: const Icon(Icons.add_circle_outline),
                           iconSize: 28,
-                          tooltip: 'Resupply (+1L)',
+                          tooltip: 'Resupply 1L',
                           onPressed: () => _writeCounter(_node, true),
                         ),
                       ],
