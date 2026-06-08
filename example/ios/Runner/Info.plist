@@ -28,6 +28,12 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Used to participate in a peat mesh network over Bluetooth LE.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Used to discover and connect to peat mesh peers on the local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_irohv1._udp</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

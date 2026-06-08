@@ -76,6 +76,12 @@ class PeatFlutterNode {
   /// This node's hex-encoded unique identifier.
   String get nodeId => _node.nodeId();
 
+  /// Number of currently connected peers.
+  int get peerCount => _node.peerCount();
+
+  /// List of currently connected peer node IDs.
+  List<String> get connectedPeers => _node.connectedPeers();
+
   /// Start mesh synchronisation.
   void startSync() => _node.startSync();
 

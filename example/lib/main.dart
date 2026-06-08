@@ -38,6 +38,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   bool _bleRunning = false;
   int _bleFrameCount = 0;
   final List<String> _changeLog = [];
+  List<String> _peers = [];
+  Timer? _peerTimer;
   StreamSubscription<DocumentChange>? _changeSub;
   StreamSubscription<OutboundFrame>? _outboundSub;
   int _publishCount = 0;
@@ -63,6 +65,11 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         transport: null,
       ));
       node.startSync();
+
+      _peerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+        if (!mounted || _node == null) return;
+        setState(() => _peers = _node!.connectedPeers);
+      });
 
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
@@ -148,12 +155,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   void _stopNode() {
     _changeSub?.cancel();
     _outboundSub?.cancel();
+    _peerTimer?.cancel();
     _node?.dispose();
     setState(() {
       _node = null;
       _nodeId = null;
       _changeSub = null;
       _outboundSub = null;
+      _peerTimer = null;
+      _peers = [];
       _bleRunning = false;
       _bleFrameCount = 0;
     });
@@ -163,6 +173,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   void dispose() {
     _changeSub?.cancel();
     _outboundSub?.cancel();
+    _peerTimer?.cancel();
     _node?.dispose();
     super.dispose();
   }
@@ -202,6 +213,29 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
               Text('Node ID: $_nodeId',
                   style: theme.textTheme.bodySmall
                       ?.copyWith(fontFamily: 'monospace')),
+              const SizedBox(height: 4),
+              Row(children: [
+                Icon(
+                  _peers.isEmpty ? Icons.wifi_off : Icons.wifi,
+                  size: 14,
+                  color: _peers.isEmpty ? theme.colorScheme.outline : Colors.green,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  _peers.isEmpty
+                      ? 'No peers connected'
+                      : '${_peers.length} peer${_peers.length == 1 ? '' : 's'} connected',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _peers.isEmpty ? theme.colorScheme.outline : Colors.green,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ]),
+              if (_peers.isNotEmpty)
+                ...(_peers.map((p) => Text(
+                  '  • ${p.length > 16 ? '${p.substring(0, 8)}…${p.substring(p.length - 8)}' : p}',
+                  style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                ))),
             ],
 
             const SizedBox(height: 12),
