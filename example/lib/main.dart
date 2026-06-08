@@ -81,35 +81,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       ));
       node.startSync();
 
-      // Track known doc IDs per collection to detect remote arrivals.
-      final Map<String, Set<String>> _knownDocs = {};
-
       _peerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
         if (!mounted || _node == null) return;
         setState(() {
           _peers = _node!.connectedPeers;
           _syncStats = _node!.syncStats;
         });
-
-        // Poll for remotely-synced documents not yet seen via change events.
-        for (final col in ['test']) {
-          final current = _node!.listDocuments(col).toSet();
-          final known = _knownDocs[col] ?? {};
-          final newDocs = current.difference(known);
-          if (newDocs.isNotEmpty && mounted) {
-            setState(() {
-              for (final id in newDocs) {
-                _changeLog.insert(0, '[sync] $col/$id');
-              }
-              if (_changeLog.length > 100) {
-                _changeLog.removeRange(100, _changeLog.length);
-              }
-            });
-            _knownDocs[col] = current;
-          } else {
-            _knownDocs[col] = current;
-          }
-        }
       });
 
       final sub = node.subscribeChanges().listen((change) {

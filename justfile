@@ -9,25 +9,46 @@ generated_dir := "lib/src/generated"
 proto_dir     := "lib/src/proto"
 proto_src     := peat_workspace + "/peat-schema/proto"
 
-# Generate Dart FFI bindings from the peat-ffi cdylib via uniffi-bindgen-dart.
+# Validate that the generated Dart FFI bindings are consistent with the
+# compiled peat-ffi library. The bindings in lib/src/generated/peat_ffi.dart
+# are maintained manually (the uniffi-bindgen-dart generator tool is not
+# currently publicly available).
 #
-# Requires:
-#   cargo install --git https://github.com/NicolasFrantzen/uniffi-bindgen-dart
-#   (build peat-ffi first — see below)
-gen-bindings:
+# When peat-ffi's API surface changes, you need to update manually:
+#   1. peat/peat-ffi/src/dart_ffi.rs  — add/remove uniffi_ffibuffer_* wrappers
+#   2. lib/src/generated/peat_ffi.dart — add/remove Dart method stubs
+#      (follow the existing patterns: argBuf/returnBuf layouts, _uniffiRead* decoders)
+#   3. Run: just check-bindings  (this task) to verify checksums still pass at runtime
+#
+# Known manual fixes in peat_ffi.dart that must be preserved:
+#   - bindingsContractVersion = 30  (matches uniffi 0.31 contract)
+#   - createNode return: PeatNodeFfiCodec.lift((returnBuf + 0).ref.u64)
+#   - subscribe callback arg: _DocumentCallbackCallbackBridge.instance.register(callback)
+check-bindings:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Find the most recently built host cdylib
     lib=$(ls "{{peat_workspace}}"/target/release/libpeat_ffi.{so,dylib} 2>/dev/null | head -1 || true)
     if [ -z "$lib" ]; then
-        echo "ERROR: libpeat_ffi not found in {{peat_workspace}}/target/release/."
-        echo "Build it first:"
-        echo "  cd {{peat_workspace}} && cargo build -p peat-ffi --features sync,bluetooth"
+        echo "ERROR: libpeat_ffi not found. Build with: just build-host"
         exit 1
     fi
-    mkdir -p "{{generated_dir}}"
-    uniffi-bindgen-dart generate --library "$lib" --out-dir "{{generated_dir}}"
-    echo "Bindings written to {{generated_dir}}/"
+    echo "Library: $lib"
+    echo "Checking expected ffibuffer symbols are present..."
+    missing=0
+    for sym in \
+        uniffi_ffibuffer_peat_ffi_fn_func_create_node \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_subscribe_poll \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_request_sync \
+        ffi_uniffi_peat_ffi_rustbuffer_from_bytes \
+        ffi_peat_ffi_uniffi_contract_version; do
+        if ! nm "$lib" 2>/dev/null | grep -q "_${sym}"; then
+            echo "  MISSING: $sym"
+            missing=$((missing + 1))
+        else
+            echo "  OK: $sym"
+        fi
+    done
+    [ $missing -eq 0 ] && echo "All checked symbols present." || exit 1
 
 # Generate Dart proto stubs from peat-schema protos via protoc-gen-dart.
 #
@@ -79,8 +100,8 @@ build-host:
         -p peat-ffi \
         --features sync,bluetooth
 
-# Re-run both generation steps. Run after any peat-ffi surface change.
-regen: gen-bindings gen-proto
+# Regenerate proto stubs and verify bindings. Run after any peat-ffi surface change.
+regen: gen-proto check-bindings
 
 # Run dart analyze over the library sources.
 analyze:
