@@ -1,11 +1,43 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:peat_flutter/peat_flutter.dart';
 import 'package:peat_flutter/src/generated/peat_ffi.dart' show SyncStats;
+
+/// A single document change event for the activity feed.
+class _ChangeEntry {
+  final String changeType; // 'upsert' | 'delete'
+  final String collection;
+  final String docId;
+  final String? contentPreview; // first 80 chars of JSON, pretty-ish
+  final DateTime timestamp;
+
+  _ChangeEntry({
+    required this.changeType,
+    required this.collection,
+    required this.docId,
+    this.contentPreview,
+    required this.timestamp,
+  });
+
+  String get shortDocId {
+    final parts = docId.split('-');
+    if (parts.length >= 2) return '${parts.last.substring(0, min(8, parts.last.length))}';
+    return docId.length > 8 ? '${docId.substring(0, 8)}…' : docId;
+  }
+
+  String get relativeTime {
+    final diff = DateTime.now().difference(timestamp);
+    if (diff.inSeconds < 2) return 'now';
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    return '${diff.inHours}h ago';
+  }
+}
 
 void main() {
   PeatFlutterNode.initialize();
@@ -41,7 +73,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   bool _stopping = false;
   bool _bleRunning = false;
   int _bleFrameCount = 0;
-  final List<String> _changeLog = [];
+  final List<_ChangeEntry> _changeLog = [];
+  Timer? _changeLogTimer; // drives relative-time refresh
   List<String> _peers = [];
   SyncStats? _syncStats;
   Timer? _peerTimer;
@@ -113,16 +146,43 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         });
       });
 
+      // Refresh relative timestamps every 10 s
+      _changeLogTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (mounted) setState(() {});
+      });
+
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
-        // Filter internal counter docs — the counter UI handles those.
         if (change.docId.startsWith('counter-') || change.docId == 'counter') return;
+        // Fetch content for preview while we still have a reference to node.
+        String? preview;
+        try {
+          final raw = node.getRaw(change.collection, change.docId);
+          if (raw != null) {
+            // Try to pretty-decode JSON into a short key=value summary.
+            final map = jsonDecode(raw) as Map<String, dynamic>?;
+            if (map != null) {
+              preview = map.entries
+                  .take(3)
+                  .map((e) {
+                    final v = e.value?.toString() ?? 'null';
+                    return '${e.key}: ${v.length > 20 ? '${v.substring(0, 20)}…' : v}';
+                  })
+                  .join('  ·  ');
+            } else {
+              preview = raw.length > 60 ? '${raw.substring(0, 60)}…' : raw;
+            }
+          }
+        } catch (_) {}
         setState(() {
-          _changeLog.insert(
-            0,
-            '[${change.changeType.name}] ${change.collection}/${change.docId}',
-          );
-          if (_changeLog.length > 100) _changeLog.removeLast();
+          _changeLog.insert(0, _ChangeEntry(
+            changeType: change.changeType.name,
+            collection: change.collection,
+            docId: change.docId,
+            contentPreview: preview,
+            timestamp: DateTime.now(),
+          ));
+          if (_changeLog.length > 50) _changeLog.removeLast();
         });
       });
 
@@ -205,6 +265,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     }
   }
 
+  Color _collectionColor(String collection, ThemeData theme) {
+    // Stable color per collection name
+    final colors = [
+      Colors.blue, Colors.purple, Colors.teal,
+      Colors.orange, Colors.pink, Colors.indigo,
+    ];
+    return colors[collection.hashCode.abs() % colors.length];
+  }
+
   void _publishTest() {
     final node = _node;
     if (node == null) return;
@@ -214,10 +283,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         'test',
         '{"seq":$count,"ts":${DateTime.now().millisecondsSinceEpoch}}',
       );
-      setState(() {
-        _changeLog.insert(0, '[pub] test/$docId');
-        if (_changeLog.length > 100) _changeLog.removeLast();
-      });
+      // The subscription listener will add this to the change feed.
     } catch (e) {
       setState(() => _error = e.toString());
     }
@@ -264,6 +330,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     _outboundSub?.cancel();
     _peerTimer?.cancel();
     _counterTimer?.cancel();
+    _changeLogTimer?.cancel();
     try { _node?.dispose(); } catch (_) {}
     Future.delayed(const Duration(seconds: 5), () {
       if (mounted) setState(() => _stopping = false);
@@ -292,6 +359,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     _outboundSub?.cancel();
     _peerTimer?.cancel();
     _counterTimer?.cancel();
+    _changeLogTimer?.cancel();
     _node?.dispose();
     super.dispose();
   }
@@ -456,25 +524,125 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
             ],
 
             const SizedBox(height: 16),
-            Text('Document changes',
-                style: theme.textTheme.titleSmall),
+            Row(children: [
+              Text('Document changes', style: theme.textTheme.titleSmall),
+              const Spacer(),
+              if (_changeLog.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() => _changeLog.clear()),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text('clear', style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.outline)),
+                ),
+            ]),
             const Divider(height: 8),
 
-            // ---- change log ----
+            // ---- activity feed ----
             Expanded(
               child: _changeLog.isEmpty
-                  ? const Center(
-                      child: Text('No changes yet — start node and publish.'))
-                  : ListView.builder(
+                  ? Center(
+                      child: Text(
+                        hasNode
+                            ? 'No changes yet — publish a doc to see activity.'
+                            : 'Start a node to see document activity.',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.outline),
+                        textAlign: TextAlign.center,
+                      ))
+                  : ListView.separated(
                       itemCount: _changeLog.length,
-                      itemBuilder: (_, i) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 1),
-                        child: Text(
-                          _changeLog[i],
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(fontFamily: 'monospace'),
-                        ),
-                      ),
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, indent: 48),
+                      itemBuilder: (_, i) {
+                        final e = _changeLog[i];
+                        final collColor = _collectionColor(e.collection, theme);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Collection badge
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: collColor.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    e.collection.substring(0, min(3, e.collection.length)).toUpperCase(),
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: collColor,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              // Content
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(children: [
+                                      Text(
+                                        '${e.collection} / ${e.shortDocId}',
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 5, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: e.changeType == 'upsert'
+                                              ? Colors.green.withOpacity(0.15)
+                                              : Colors.red.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          e.changeType,
+                                          style: theme.textTheme.labelSmall?.copyWith(
+                                            color: e.changeType == 'upsert'
+                                                ? Colors.green.shade700
+                                                : Colors.red.shade700,
+                                          ),
+                                        ),
+                                      ),
+                                    ]),
+                                    if (e.contentPreview != null)
+                                      Text(
+                                        e.contentPreview!,
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: theme.colorScheme.onSurface.withOpacity(0.7),
+                                          fontFamily: 'monospace',
+                                          fontSize: 11,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              // Relative time
+                              Text(
+                                e.relativeTime,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.outline,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
             ),
           ],
