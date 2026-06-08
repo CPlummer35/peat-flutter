@@ -167,11 +167,17 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
 
       _peerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
         if (!mounted || _node == null) return;
+        // Clean up ghost entries that may have synced in from the peer.
+        _cleanGhostNodes(_node!);
+
         final seen = <String>{};
         setState(() {
           _peers = _node!.connectedPeers;
           _syncStats = _node!.syncStats;
-          _roster = _node!.nodes.where((n) => seen.add(n.id)).toList();
+          // Filter out trivially invalid IDs (e.g. 'unknown') and dedup.
+          _roster = _node!.nodes
+              .where((n) => n.id.length >= 16 && seen.add(n.id))
+              .toList();
         });
       });
 
@@ -264,12 +270,21 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
 
   void _publishSelf(PeatFlutterNode node) {
     final id = node.nodeId;
-    // Delete any stale entries with the same hostname but a different ID
-    // (e.g. leftover 'unknown' entries from a previous session).
-    for (final stale in node.nodes.where((n) => n.name == _hostName && n.id != id)) {
-      try { node.deleteNode(stale.id); } catch (_) {}
-    }
+    _cleanGhostNodes(node);
     node.publishSelf(nodeId: id, name: _hostName, capabilities: _myCapabilities);
+  }
+
+  void _cleanGhostNodes(PeatFlutterNode node) {
+    final myId = node.nodeId;
+    // Remove: same hostname with wrong ID, or any node with invalid ID format.
+    for (final n in node.nodes) {
+      final isGhost = (n.name == _hostName && n.id != myId) ||
+          n.id.length < 16 ||
+          n.id == 'unknown';
+      if (isGhost) {
+        try { node.deleteNode(n.id); } catch (_) {}
+      }
+    }
   }
 
   void _refreshCounter(PeatFlutterNode node) {
