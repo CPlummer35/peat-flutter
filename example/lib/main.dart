@@ -75,8 +75,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   int _bleFrameCount = 0;
   final List<_ChangeEntry> _changeLog = [];
   Timer? _changeLogTimer; // drives relative-time refresh
-  // Docs that already existed at subscription time — don't surface as new events.
-  final Set<String> _knownAtSubscribe = {};
+  // Content hashes: key → hash of last-seen raw JSON.
+  // Show an entry only when content actually changed (new doc or mutation).
+  // Survives stop/start so reconnect-triggered re-syncs of unchanged docs are silent.
+  final Map<String, int> _contentHashes = {};
   List<String> _peers = [];
   SyncStats? _syncStats;
   Timer? _peerTimer;
@@ -155,52 +157,57 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         if (mounted) setState(() {});
       });
 
-      // Snapshot all docs that already exist so we don't flood the feed
-      // with historical entries when the peer syncs on connect.
-      _knownAtSubscribe.clear();
+      // Pre-populate content hashes so unchanged docs re-synced by the peer
+      // are silent. Only new content (new doc or mutation) shows in the feed.
       for (final col in ['test', 'demo']) {
         try {
           for (final id in node.listDocuments(col)) {
-            _knownAtSubscribe.add('$col/$id');
+            final raw = node.getRaw(col, id);
+            if (raw != null) _contentHashes['$col/$id'] = raw.hashCode;
           }
         } catch (_) {}
       }
+      // Clear the feed so this session starts fresh.
+      setState(() => _changeLog.clear());
 
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
         final key = '${change.collection}/${change.docId}';
-        // Skip docs that were already in the store when we subscribed.
-        if (_knownAtSubscribe.contains(key)) {
-          _knownAtSubscribe.remove(key); // allow re-appearance on next change
-          return;
-        }
-        // Fetch content for preview while we still have a reference to node.
+
+        // Fetch content and compute hash. Only surface the event if the
+        // content actually changed — this silences re-syncs of unchanged
+        // docs while still showing updates from the other device.
         String? preview;
         try {
           final raw = node.getRaw(change.collection, change.docId);
-          if (raw != null) {
-            final map = jsonDecode(raw) as Map<String, dynamic>?;
-            if (map != null) {
-              // Counter docs: show net value prominently
-              if (change.docId.startsWith('counter-') || change.docId == 'counter') {
-                final inc = map['inc'] as int? ?? 0;
-                final dec = map['dec'] as int? ?? 0;
-                final by = map['by'] as String? ?? '';
-                preview = 'value: ${inc - dec}  ·  by: $by';
-              } else {
-                preview = map.entries
-                    .take(3)
-                    .map((e) {
-                      final v = e.value?.toString() ?? 'null';
-                      return '${e.key}: ${v.length > 20 ? '${v.substring(0, 20)}…' : v}';
-                    })
-                    .join('  ·  ');
-              }
+          if (raw == null) return; // doc vanished
+          final newHash = raw.hashCode;
+          final knownHash = _contentHashes[key];
+          if (knownHash == newHash) return; // same content, skip
+          _contentHashes[key] = newHash;   // record new hash
+
+          final map = jsonDecode(raw) as Map<String, dynamic>?;
+          if (map != null) {
+            if (change.docId.startsWith('counter-') || change.docId == 'counter') {
+              final inc = map['inc'] as int? ?? 0;
+              final dec = map['dec'] as int? ?? 0;
+              final by = map['by'] as String? ?? '';
+              preview = 'value: ${inc - dec}  ·  by: $by';
             } else {
-              preview = raw.length > 60 ? '${raw.substring(0, 60)}…' : raw;
+              preview = map.entries
+                  .take(3)
+                  .map((e) {
+                    final v = e.value?.toString() ?? 'null';
+                    return '${e.key}: ${v.length > 20 ? '${v.substring(0, 20)}…' : v}';
+                  })
+                  .join('  ·  ');
             }
+          } else {
+            preview = raw.length > 60 ? '${raw.substring(0, 60)}…' : raw;
           }
-        } catch (_) {}
+        } catch (_) {
+          return;
+        }
         setState(() {
           _changeLog.insert(0, _ChangeEntry(
             changeType: change.changeType.name,
@@ -402,7 +409,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _syncStats = null;
       _counterLastBy = null;
       _peerNames.clear();
-      _knownAtSubscribe.clear();
+      // _contentHashes persists across stop/start intentionally.
       _stopping = false;
       // Keep _myInc/_myDec/_counterDirty/_peerContributions so offline
       // edits and peer values persist across stop/start cycles.
