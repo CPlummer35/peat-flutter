@@ -75,6 +75,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   int _bleFrameCount = 0;
   final List<_ChangeEntry> _changeLog = [];
   Timer? _changeLogTimer; // drives relative-time refresh
+  // Docs that already existed at subscription time — don't surface as new events.
+  final Set<String> _knownAtSubscribe = {};
   List<String> _peers = [];
   SyncStats? _syncStats;
   Timer? _peerTimer;
@@ -90,6 +92,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   bool _counterDirty = false; // local edits not yet flushed to store
   // Contributions from peers: docId → (inc - dec)
   final Map<String, int> _peerContributions = {};
+  // Friendly name for each peer's counter slot
+  final Map<String, String> _peerNames = {};
   int get _counterValue => (_myInc - _myDec) + _peerContributions.values.fold(0, (a, b) => a + b);
   String? _counterLastBy;
   Timer? _counterTimer;
@@ -151,24 +155,47 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         if (mounted) setState(() {});
       });
 
+      // Snapshot all docs that already exist so we don't flood the feed
+      // with historical entries when the peer syncs on connect.
+      _knownAtSubscribe.clear();
+      for (final col in ['test', 'demo']) {
+        try {
+          for (final id in node.listDocuments(col)) {
+            _knownAtSubscribe.add('$col/$id');
+          }
+        } catch (_) {}
+      }
+
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
-        if (change.docId.startsWith('counter-') || change.docId == 'counter') return;
+        final key = '${change.collection}/${change.docId}';
+        // Skip docs that were already in the store when we subscribed.
+        if (_knownAtSubscribe.contains(key)) {
+          _knownAtSubscribe.remove(key); // allow re-appearance on next change
+          return;
+        }
         // Fetch content for preview while we still have a reference to node.
         String? preview;
         try {
           final raw = node.getRaw(change.collection, change.docId);
           if (raw != null) {
-            // Try to pretty-decode JSON into a short key=value summary.
             final map = jsonDecode(raw) as Map<String, dynamic>?;
             if (map != null) {
-              preview = map.entries
-                  .take(3)
-                  .map((e) {
-                    final v = e.value?.toString() ?? 'null';
-                    return '${e.key}: ${v.length > 20 ? '${v.substring(0, 20)}…' : v}';
-                  })
-                  .join('  ·  ');
+              // Counter docs: show net value prominently
+              if (change.docId.startsWith('counter-') || change.docId == 'counter') {
+                final inc = map['inc'] as int? ?? 0;
+                final dec = map['dec'] as int? ?? 0;
+                final by = map['by'] as String? ?? '';
+                preview = 'value: ${inc - dec}  ·  by: $by';
+              } else {
+                preview = map.entries
+                    .take(3)
+                    .map((e) {
+                      final v = e.value?.toString() ?? 'null';
+                      return '${e.key}: ${v.length > 20 ? '${v.substring(0, 20)}…' : v}';
+                    })
+                    .join('  ·  ');
+              }
             } else {
               preview = raw.length > 60 ? '${raw.substring(0, 60)}…' : raw;
             }
@@ -234,6 +261,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         if (raw != null) {
           final map = jsonDecode(raw) as Map<String, dynamic>;
           updated[docId] = (map['inc'] as int? ?? 0) - (map['dec'] as int? ?? 0);
+          final by = map['by'] as String?;
+          if (by != null) _peerNames[docId] = by;
         }
       } catch (_) {}
     }
@@ -263,6 +292,33 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     } else {
       setState(() => _counterDirty = true);
     }
+  }
+
+  Widget _contribChip({
+    required BuildContext context,
+    required String label,
+    required int value,
+    required ThemeData theme,
+    required bool isMe,
+  }) {
+    final color = isMe ? theme.colorScheme.primary : theme.colorScheme.secondary;
+    // Shorten label: "macOS · H42W5J2K26" → "macOS", "iPhone (simulator)" → "iPhone"
+    final shortLabel = label.split(' ·').first.split(' (').first.trim();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        '$shortLabel: $value',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
   }
 
   Color _collectionColor(String collection, ThemeData theme) {
@@ -345,6 +401,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _peers = [];
       _syncStats = null;
       _counterLastBy = null;
+      _peerNames.clear();
+      _knownAtSubscribe.clear();
       _stopping = false;
       // Keep _myInc/_myDec/_counterDirty/_peerContributions so offline
       // edits and peer values persist across stop/start cycles.
@@ -501,12 +559,37 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                         ),
                       ],
                     ),
-                    if (_counterLastBy != null)
+                    const SizedBox(height: 6),
+                    // Per-node contribution breakdown
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        _contribChip(
+                          context: context,
+                          label: 'You',
+                          value: _myInc - _myDec,
+                          theme: theme,
+                          isMe: true,
+                        ),
+                        ..._peerContributions.entries.map((e) => _contribChip(
+                          context: context,
+                          label: _peerNames[e.key] ?? e.key.replaceFirst('counter-', '').replaceAll('_', ' '),
+                          value: e.value,
+                          theme: theme,
+                          isMe: false,
+                        )),
+                      ],
+                    ),
+                    if (_counterLastBy != null) ...[
+                      const SizedBox(height: 4),
                       Text(
                         'last write: $_counterLastBy',
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: theme.colorScheme.outline),
                       ),
+                    ],
                   ],
                 ),
               ),
