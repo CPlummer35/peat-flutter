@@ -52,6 +52,12 @@ class PeatExampleApp extends StatelessWidget {
     return MaterialApp(
       title: 'peat_flutter example',
       theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      darkTheme: ThemeData(
+        colorSchemeSeed: Colors.indigo,
+        useMaterial3: true,
+        brightness: Brightness.dark,
+      ),
+      themeMode: ThemeMode.system,
       home: const PeatExampleHome(),
     );
   }
@@ -84,10 +90,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   Timer? _peerTimer;
 
   // Node presence / G-Set roster
+  // Capabilities are role-oriented: leader caps vs field caps
   static const _allCapabilities = [
-    'comms', 'recon', 'medical', 'logistics', 'fire-support', 'transport',
+    'leader', 'comms', 'logistics',   // command/support
+    'recon', 'medical', 'transport',  // field roles
   ];
-  List<String> _myCapabilities = ['comms', 'logistics'];
+  late List<String> _myCapabilities;
   List<NodeInfo> _roster = [];
 
   // PN-Counter CRDT: each node maintains its own (inc, dec) slot so
@@ -117,10 +125,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     super.initState();
     if (Platform.isIOS) {
       _hostName = 'iPhone (simulator)';
+      _myCapabilities = ['recon', 'medical'];  // field node
     } else if (Platform.isMacOS) {
       _hostName = 'macOS · ${Platform.localHostname.split('.').first}';
+      _myCapabilities = ['leader', 'comms', 'logistics'];  // command post
     } else {
       _hostName = Platform.operatingSystem;
+      _myCapabilities = ['comms'];
     }
   }
 
@@ -183,6 +194,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
 
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
+        // Nodes collection is shown in the roster — skip it in the feed.
+        if (change.collection == 'nodes') return;
         final key = '${change.collection}/${change.docId}';
 
         // Fetch content and compute hash. Only surface the event if the
@@ -249,8 +262,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   }
 
   void _publishSelf(PeatFlutterNode node) {
+    // Use node.nodeId directly (not _nodeId which may not be set yet).
     node.publishSelf(
-      nodeId: _nodeId ?? 'unknown',
+      nodeId: node.nodeId,
       name: _hostName,
       capabilities: _myCapabilities,
     );
@@ -454,16 +468,31 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     final hasNode = _node != null;
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('peat_flutter example'),
         backgroundColor: theme.colorScheme.inversePrimary,
+        bottom: const TabBar(
+          tabs: [
+            Tab(icon: Icon(Icons.water_drop), text: 'Operations'),
+            Tab(icon: Icon(Icons.timeline), text: 'Activity'),
+          ],
+        ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: TabBarView(
+        children: [
+          // ── Tab 0: Operations ────────────────────────────────────────
+          Column(
           children: [
+          Expanded(
+            child: CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate([
             // ---- status / error banner ----
             if (_error != null)
               Card(
@@ -481,43 +510,33 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
 
             if (_nodeId != null) ...[
               const SizedBox(height: 4),
-              Text('$_hostName',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-              Text(
-                '${_nodeId!.substring(0, 8)}…${_nodeId!.substring(_nodeId!.length - 8)}',
-                style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace', color: theme.colorScheme.outline),
-              ),
-              const SizedBox(height: 4),
               Row(children: [
-                Icon(
-                  _peers.isEmpty ? Icons.wifi_off : Icons.wifi,
-                  size: 14,
-                  color: _peers.isEmpty ? theme.colorScheme.outline : Colors.green,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _peers.isEmpty
-                      ? 'No peers connected'
-                      : '${_peers.length} peer${_peers.length == 1 ? '' : 's'} connected',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: _peers.isEmpty ? theme.colorScheme.outline : Colors.green,
-                    fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('$_hostName',
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold)),
+                      Text(
+                        '${_nodeId!.substring(0, 8)}…${_nodeId!.substring(_nodeId!.length - 8)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                            color: theme.colorScheme.outline),
+                      ),
+                    ],
                   ),
                 ),
+                if (_syncStats != null)
+                  Text(
+                    '↑${_syncStats!.bytesSent}B  ↓${_syncStats!.bytesReceived}B',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontFamily: 'monospace',
+                      color: theme.colorScheme.outline,
+                      fontSize: 10,
+                    ),
+                  ),
               ]),
-              if (_peers.isNotEmpty)
-                ...(_peers.map((p) => Text(
-                  '  • ${p.length > 16 ? '${p.substring(0, 8)}…${p.substring(p.length - 8)}' : p}',
-                  style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-                ))),
-              if (_syncStats != null)
-                Text(
-                  '↑${_syncStats!.bytesSent}B  ↓${_syncStats!.bytesReceived}B',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                    color: theme.colorScheme.outline,
-                  ),
-                ),
             ],
 
             const SizedBox(height: 12),
@@ -679,15 +698,23 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                       const SizedBox(height: 4),
                       ..._roster.map((n) {
                         final isMe = n.id == _nodeId;
+                        final isConnected = isMe || _peers.contains(n.id);
                         return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          padding: const EdgeInsets.symmetric(vertical: 3),
                           child: Row(children: [
+                            // Connection indicator
                             Icon(
-                              isMe ? Icons.person : Icons.person_outline,
+                              isMe
+                                  ? Icons.person
+                                  : isConnected
+                                      ? Icons.wifi
+                                      : Icons.wifi_off,
                               size: 14,
                               color: isMe
                                   ? theme.colorScheme.primary
-                                  : theme.colorScheme.secondary,
+                                  : isConnected
+                                      ? Colors.green
+                                      : theme.colorScheme.outline,
                             ),
                             const SizedBox(width: 6),
                             Expanded(
@@ -697,13 +724,16 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                                   fontWeight: isMe
                                       ? FontWeight.bold
                                       : FontWeight.normal,
+                                  color: isConnected
+                                      ? null
+                                      : theme.colorScheme.outline,
                                 ),
                               ),
                             ),
                             Wrap(
                               spacing: 3,
                               children: n.capabilities
-                                  .take(4)
+                                  .take(5)
                                   .map((c) => Container(
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 4, vertical: 1),
@@ -737,26 +767,38 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
               ),
             ],
 
-            const SizedBox(height: 16),
-            Row(children: [
-              Text('Document changes', style: theme.textTheme.titleSmall),
-              const Spacer(),
-              if (_changeLog.isNotEmpty)
-                TextButton(
-                  onPressed: () => setState(() => _changeLog.clear()),
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(0, 0),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text('clear', style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.outline)),
-                ),
-            ]),
-            const Divider(height: 8),
+                    ]), // SliverChildListDelegate
+                  ), // SliverList
+                ), // SliverPadding
+              ], // slivers
+            ), // CustomScrollView
+          ), // Expanded
+          Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom)),
+          ],  // Column children (Operations tab)
+          ), // Column (Operations tab)
 
-            // ---- activity feed ----
-            Expanded(
+          // ── Tab 1: Activity ──────────────────────────────────────────
+          Column(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(children: [
+                Text('Document changes', style: theme.textTheme.titleSmall),
+                const Spacer(),
+                if (_changeLog.isNotEmpty)
+                  TextButton(
+                    onPressed: () => setState(() => _changeLog.clear()),
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 0),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text('clear', style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.outline)),
+                  ),
+              ]),
+            ),
+            const Divider(height: 1),
+          Expanded(
               child: _changeLog.isEmpty
                   ? Center(
                       child: Text(
@@ -859,9 +901,11 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                       },
                     ),
             ),
-          ],
-        ),
-      ),
-    );
+          ]), // Column (Activity tab)
+
+          ], // TabBarView children
+        ), // TabBarView
+      ), // Scaffold
+    ); // DefaultTabController
   }
 }
