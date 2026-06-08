@@ -560,27 +560,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                       ],
                     ),
                     const SizedBox(height: 6),
-                    // Per-node contribution breakdown
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8,
-                      runSpacing: 4,
-                      children: [
-                        _contribChip(
-                          context: context,
-                          label: 'You',
-                          value: _myInc - _myDec,
-                          theme: theme,
-                          isMe: true,
-                        ),
-                        ..._peerContributions.entries.map((e) => _contribChip(
-                          context: context,
-                          label: _peerNames[e.key] ?? e.key.replaceFirst('counter-', '').replaceAll('_', ' '),
-                          value: e.value,
-                          theme: theme,
-                          isMe: false,
-                        )),
-                      ],
+                    // Local contribution chip
+                    _contribChip(
+                      context: context,
+                      label: 'You',
+                      value: _myInc - _myDec,
+                      theme: theme,
+                      isMe: true,
                     ),
                     if (_counterLastBy != null) ...[
                       const SizedBox(height: 4),
