@@ -4,6 +4,7 @@ import 'dart:io' show Platform, Directory;
 import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:path_provider/path_provider.dart';
 import 'package:peat_flutter/peat_flutter.dart';
 import 'package:peat_flutter/src/generated/peat_ffi.dart' show SyncStats;
@@ -1084,15 +1085,23 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         foregroundColor: Colors.white,
         toolbarHeight: 0,
         automaticallyImplyLeading: false,
+        // White status bar icons so the whole top strip reads as one blue band
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Color(0xFF2768D4),
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
+        ),
         bottom: const TabBar(
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white70,
           indicatorColor: Colors.white,
           dividerColor: Colors.transparent,
+          labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: TextStyle(fontSize: 13),
           tabs: [
-            Tab(icon: Icon(Icons.water_drop, size: 18), text: 'Operations'),
-            Tab(icon: Icon(Icons.timeline, size: 18), text: 'Activity'),
-            Tab(icon: Icon(Icons.info_outline, size: 18), text: 'About'),
+            Tab(height: 34, text: 'Operations'),
+            Tab(height: 34, text: 'Activity'),
+            Tab(height: 34, text: 'About'),
           ],
         ),
       ),
