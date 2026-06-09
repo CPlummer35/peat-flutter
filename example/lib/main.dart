@@ -4,7 +4,7 @@ import 'dart:io' show Platform, Directory;
 import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemUiOverlayStyle;
+import 'package:flutter/services.dart' show SystemUiOverlayStyle, SystemChrome;
 import 'package:path_provider/path_provider.dart';
 import 'package:peat_flutter/peat_flutter.dart';
 import 'package:peat_flutter/src/generated/peat_ffi.dart' show SyncStats;
@@ -1076,36 +1076,41 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     final hasNode = _node != null;
     final theme = Theme.of(context);
 
+    // Paint the status bar blue to match the header strip.
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Color(0xFF2768D4),
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+    ));
+
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-      resizeToAvoidBottomInset: false, // keyboard overlays; CustomScrollView handles scroll
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF2768D4), // Peat fox blue
-        foregroundColor: Colors.white,
-        toolbarHeight: 0,
-        automaticallyImplyLeading: false,
-        // White status bar icons so the whole top strip reads as one blue band
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Color(0xFF2768D4),
-          statusBarIconBrightness: Brightness.light,
-          statusBarBrightness: Brightness.dark,
+      resizeToAvoidBottomInset: false,
+      // No AppBar — we draw the blue header manually so tabs sit flush
+      // against the safe area with zero dead space.
+      body: Column(children: [
+        // Blue header: status bar inset + tab bar, no toolbar height gap
+        Material(
+          color: const Color(0xFF2768D4),
+          child: Column(children: [
+            SizedBox(height: MediaQuery.of(context).padding.top),
+            const TabBar(
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              indicatorColor: Colors.white,
+              dividerColor: Colors.transparent,
+              labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              unselectedLabelStyle: TextStyle(fontSize: 13),
+              tabs: [
+                Tab(height: 42, icon: Icon(Icons.water_drop, size: 16), text: 'Operations'),
+                Tab(height: 42, icon: Icon(Icons.timeline, size: 16), text: 'Activity'),
+                Tab(height: 42, icon: Icon(Icons.info_outline, size: 16), text: 'About'),
+              ],
+            ),
+          ]),
         ),
-        bottom: const TabBar(
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          indicatorColor: Colors.white,
-          dividerColor: Colors.transparent,
-          labelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: TextStyle(fontSize: 13),
-          tabs: [
-            Tab(height: 34, text: 'Operations'),
-            Tab(height: 34, text: 'Activity'),
-            Tab(height: 34, text: 'About'),
-          ],
-        ),
-      ),
-      body: TabBarView(
+        Expanded(child: TabBarView(
         children: [
           // ── Tab 0: Operations ────────────────────────────────────────
           Column(
@@ -1701,7 +1706,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
           ),
 
           ], // TabBarView children
-        ), // TabBarView
+        )), // TabBarView + Expanded
+        ], // Column children (header + content)
+      ), // Column body
       ), // Scaffold
     ); // DefaultTabController
   }
