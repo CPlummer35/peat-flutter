@@ -663,16 +663,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
+      resizeToAvoidBottomInset: false, // keyboard overlays; CustomScrollView handles scroll
       appBar: AppBar(
         backgroundColor: theme.colorScheme.inversePrimary,
-        toolbarHeight: 2,
+        toolbarHeight: 0,
+        automaticallyImplyLeading: false,
         bottom: const TabBar(
-          labelPadding: EdgeInsets.symmetric(vertical: 4),
           tabs: [
-            Tab(icon: Icon(Icons.water_drop, size: 18), text: 'Operations',
-                height: 40),
-            Tab(icon: Icon(Icons.timeline, size: 18), text: 'Activity',
-                height: 40),
+            Tab(icon: Icon(Icons.water_drop, size: 18), text: 'Operations'),
+            Tab(icon: Icon(Icons.timeline, size: 18), text: 'Activity'),
           ],
         ),
       ),
