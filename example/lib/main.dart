@@ -247,14 +247,16 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
             _activeCell = cells.isNotEmpty ? cells.first : null;
             _commands = cmds;
           });
-          // Leader: auto-reform cell when peer set changes so the cell
-          // always reflects current connectivity without manual action.
+          // Leader: auto-reform cell when peer set changes.
+          // Guard: only reform if roster is populated and node is stable.
           if (_myCapabilities.contains('leader') &&
-              cells.isNotEmpty) {
+              cells.isNotEmpty &&
+              _roster.isNotEmpty &&
+              _nodeId != null) {
             final currentPeers = Set<String>.from(_peers);
             if (currentPeers != _lastCellPeers) {
               _lastCellPeers = currentPeers;
-              _formCell(); // silently republish with live roster
+              _formCell();
             }
           }
           // Auto-claim fulfilled resupply requests addressed to this node.
@@ -1078,10 +1080,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       child: Scaffold(
       resizeToAvoidBottomInset: false, // keyboard overlays; CustomScrollView handles scroll
       appBar: AppBar(
-        backgroundColor: theme.colorScheme.inversePrimary,
+        backgroundColor: const Color(0xFF2768D4), // Peat fox blue
+        foregroundColor: Colors.white,
         toolbarHeight: 0,
         automaticallyImplyLeading: false,
         bottom: const TabBar(
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          indicatorColor: Colors.white,
+          dividerColor: Colors.transparent,
           tabs: [
             Tab(icon: Icon(Icons.water_drop, size: 18), text: 'Operations'),
             Tab(icon: Icon(Icons.timeline, size: 18), text: 'Activity'),
