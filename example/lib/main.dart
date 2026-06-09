@@ -93,6 +93,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   // Cell and Command state
   CellInfo? _activeCell;
   List<CommandInfo> _commands = [];
+  // Track last peer set so the leader can auto-reform on change.
+  Set<String> _lastCellPeers = {};
   // Track command IDs we've already claimed so we don't double-increment.
   final Set<String> _claimedCommandIds = {};
   // Only auto-claim commands issued after this session started.
@@ -243,6 +245,16 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
             _activeCell = cells.isNotEmpty ? cells.first : null;
             _commands = cmds;
           });
+          // Leader: auto-reform cell when peer set changes so the cell
+          // always reflects current connectivity without manual action.
+          if (_myCapabilities.contains('leader') &&
+              cells.isNotEmpty) {
+            final currentPeers = Set<String>.from(_peers);
+            if (currentPeers != _lastCellPeers) {
+              _lastCellPeers = currentPeers;
+              _formCell(); // silently republish with live roster
+            }
+          }
           // Auto-claim fulfilled resupply requests addressed to this node.
           // Guard: only claim commands issued IN THIS SESSION to prevent
           // re-claiming old commands on restart (which would double-count).
@@ -545,19 +557,25 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   void _formCell() {
     final node = _node;
     if (node == null) return;
-    final allCaps = _roster
+    // Only include self + currently connected peers.
+    final activeIds = {_nodeId, ..._peers};
+    final activeNodes = _roster
+        .where((n) => activeIds.contains(n.id))
+        .toList();
+    if (activeNodes.isEmpty) return;
+    final allCaps = activeNodes
         .expand((n) => n.capabilities)
         .toSet()
         .toList();
-    final leader = _roster
+    final leader = activeNodes
         .firstWhere((n) => n.capabilities.contains('leader'),
-            orElse: () => _roster.first)
+            orElse: () => activeNodes.first)
         .id;
     node.putCell(CellInfo(
       id: 'alpha-cell',
       name: 'Alpha Cell',
-      status: CellStatus.active,
-      nodeCount: _roster.length,
+      status: activeNodes.length > 1 ? CellStatus.active : CellStatus.forming,
+      nodeCount: activeNodes.length,
       centerLat: 0,
       centerLon: 0,
       capabilities: allCaps,
@@ -612,7 +630,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
-                Text('${cell.nodeCount} nodes',
+                // Show live connected count (may lead the stored value by one cycle)
+                Text('${(Set<String>.from(_peers)..add(_nodeId ?? '')).length} nodes',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.outline)),
               ]),
@@ -1042,6 +1061,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _activeCell = null;
       _commands = [];
       _claimedCommandIds.clear();
+      _lastCellPeers = {};
       _roster = [];
       // _contentHashes persists across stop/start intentionally.
       _stopping = false;
