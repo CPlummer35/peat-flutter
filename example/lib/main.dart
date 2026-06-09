@@ -95,6 +95,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   List<CommandInfo> _commands = [];
   // Track command IDs we've already claimed so we don't double-increment.
   final Set<String> _claimedCommandIds = {};
+  // Only auto-claim commands issued after this session started.
+  int _sessionStartMs = 0;
 
   // Mission objective (leader-set, shared via CRDT)
   static const _missionCollection = 'mission';
@@ -203,6 +205,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       node.startSync();
       _startBle(node); // auto-start BLE on all platforms
 
+      _sessionStartMs = DateTime.now().millisecondsSinceEpoch;
       // On connect: flush offline edits + read peer contributions.
       _refreshCounter(node);
       _counterTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
@@ -233,11 +236,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
             _activeCell = cells.isNotEmpty ? cells.first : null;
             _commands = cmds;
           });
-          // Auto-claim any fulfilled resupply requests addressed to this node.
-          // The leader decremented their supply; we increment ours to receive it.
+          // Auto-claim fulfilled resupply requests addressed to this node.
+          // Guard: only claim commands issued IN THIS SESSION to prevent
+          // re-claiming old commands on restart (which would double-count).
           for (final cmd in cmds) {
             if (cmd.status == CommandStatus.completed &&
                 cmd.commandType == 'WATER_REQUEST' &&
+                cmd.createdAt >= _sessionStartMs &&
                 !_claimedCommandIds.contains(cmd.id)) {
               final params = _parseParams(cmd.parameters);
               if (params['from'] == _callsign) {
@@ -670,19 +675,25 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                   style: theme.textTheme.titleSmall
                       ?.copyWith(fontWeight: FontWeight.bold)),
               const Spacer(),
-              if (!isLeader)
-                FilledButton(
-                  onPressed: _node != null
-                      ? () => _issueWaterRequest(5)
-                      : null,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: const Size(0, 30),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text('Request 5L',
-                      style: TextStyle(fontSize: 12)),
+              FilledButton(
+                onPressed: _node != null
+                    ? () {
+                        if (isLeader) {
+                          // No commander above — add directly to own supply.
+                          for (var i = 0; i < 5; i++) _writeCounter(_node, true);
+                        } else {
+                          _issueWaterRequest(5);
+                        }
+                      }
+                    : null,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: const Size(0, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
+                child: Text(isLeader ? 'Self-resupply +5L' : 'Request 5L',
+                    style: const TextStyle(fontSize: 12)),
+              ),
             ]),
             const SizedBox(height: 6),
             if (pending.isEmpty && recent.isEmpty)
