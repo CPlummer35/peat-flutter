@@ -21,9 +21,22 @@ Pod::Spec.new do |s|
   s.vendored_frameworks = 'Frameworks/PeatFFI.xcframework'
 
   s.dependency 'Flutter'
+  # System frameworks required by peat-ffi and its Rust dependencies:
+  #   Network          — iroh QUIC transport (nw_path_monitor, etc.)
+  #   Security         — TLS / certificate handling
+  #   SystemConfiguration — network reachability
+  #   CoreBluetooth    — peat-btle BLE transport
+  s.frameworks = 'Network', 'Security', 'SystemConfiguration', 'CoreBluetooth'
+
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
     'OTHER_LDFLAGS' => '-lc++ -lresolv'
   }
+  # Prevent the linker from stripping C FFI symbols (ffi_peat_*,
+  # uniffi_ffibuffer_*) that are only looked up at runtime via
+  # DynamicLibrary.process(). Without this, dead-code elimination
+  # on device builds drops them since nothing in Swift/ObjC calls
+  # them directly.
+  s.user_target_xcconfig = { 'OTHER_LDFLAGS' => '-all_load' }
 end
