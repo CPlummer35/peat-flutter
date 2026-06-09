@@ -1246,17 +1246,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                         Column(
                           children: [
                             Text(
-                              '$_counterValue',
+                              '${_myInc - _myDec} / $_counterValue',
                               style: theme.textTheme.displaySmall
                                   ?.copyWith(fontWeight: FontWeight.bold),
                             ),
-                            // yours / total
-                            Text(
-                              '${_myInc - _myDec} / $_counterValue L',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.outline,
-                              ),
-                            ),
+                            Text('yours / total L',
+                                style: theme.textTheme.labelSmall
+                                    ?.copyWith(color: theme.colorScheme.outline)),
                           ],
                         ),
                         const SizedBox(width: 24),
