@@ -89,6 +89,19 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   SyncStats? _syncStats;
   Timer? _peerTimer;
 
+  // Mission objective (leader-set, shared via CRDT)
+  static const _missionCollection = 'mission';
+  static const _missionDocId = 'objective';
+  static const _litersPerPersonPerDay = 3;
+  int _missionDays = 0;       // 0 = not set
+  String? _missionSetBy;
+  int _missionDaysDraft = 3;  // leader UI stepper
+
+  int get _requiredLiters =>
+      _missionDays > 0 && _roster.isNotEmpty
+          ? _missionDays * _litersPerPersonPerDay * _roster.length
+          : 0;
+
   // Node presence / G-Set roster
   // Capabilities are role-oriented: leader caps vs field caps
   static const _allCapabilities = [
@@ -161,6 +174,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _counterTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
         if (!mounted || _node == null) return;
         _refreshCounter(_node!);
+        _refreshMission(_node!);
       });
 
       // Publish this node's presence into the mesh.
@@ -204,8 +218,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
 
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
-        // Nodes collection is shown in the roster — skip it in the feed.
-        if (change.collection == 'nodes') return;
+        // Internal collections shown elsewhere — skip in the feed.
+        if (change.collection == 'nodes' || change.collection == 'mission') return;
         final key = '${change.collection}/${change.docId}';
 
         // Fetch content and compute hash. Only surface the event if the
@@ -269,6 +283,33 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         _starting = false;
       });
     }
+  }
+
+  void _refreshMission(PeatFlutterNode node) {
+    try {
+      final raw = node.getRaw(_missionCollection, _missionDocId);
+      if (raw == null) return;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final days = map['days'] as int? ?? 0;
+      final by = map['by'] as String?;
+      if (mounted && (days != _missionDays || by != _missionSetBy)) {
+        setState(() {
+          _missionDays = days;
+          _missionSetBy = by;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _setMission(PeatFlutterNode node, int days) {
+    final json = jsonEncode({'days': days, 'by': _hostName,
+        'liters_per_person_per_day': _litersPerPersonPerDay});
+    node.publishRaw(_missionCollection, json, docId: _missionDocId);
+    setState(() {
+      _missionDays = days;
+      _missionSetBy = _hostName;
+      _missionDaysDraft = days;
+    });
   }
 
   void _publishSelf(PeatFlutterNode node) {
@@ -352,6 +393,122 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     } else {
       setState(() => _counterDirty = true);
     }
+  }
+
+  Widget _buildMissionCard(ThemeData theme) {
+    final isLeader = _myCapabilities.contains('leader');
+    final required = _requiredLiters;
+    final current = _counterValue;
+    final pct = required > 0 ? (current / required).clamp(0.0, 1.0) : 0.0;
+    final statusColor = pct >= 0.8
+        ? Colors.green
+        : pct >= 0.5
+            ? Colors.orange
+            : Colors.red;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.flag_outlined, size: 16),
+              const SizedBox(width: 6),
+              Text('Mission Objective',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+            ]),
+            const SizedBox(height: 8),
+
+            // Leader: day stepper
+            if (isLeader) ...[
+              Row(children: [
+                Text('Duration:', style: theme.textTheme.bodySmall),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: _missionDaysDraft > 1
+                      ? () => setState(() => _missionDaysDraft--)
+                      : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('$_missionDaysDraft day${_missionDaysDraft == 1 ? '' : 's'}',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.bold)),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: _missionDaysDraft < 30
+                      ? () => setState(() => _missionDaysDraft++)
+                      : null,
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _node != null
+                      ? () => _setMission(_node!, _missionDaysDraft)
+                      : null,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Set'),
+                ),
+              ]),
+              const SizedBox(height: 6),
+            ],
+
+            if (_missionDays > 0) ...[
+              // Supply requirement summary
+              Text(
+                '$_missionDays-day mission · ${_roster.length} node${_roster.length == 1 ? '' : 's'} · '
+                '${_litersPerPersonPerDay}L/person/day → ${required}L required',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.outline),
+              ),
+              const SizedBox(height: 8),
+              // Progress bar
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: pct,
+                  minHeight: 10,
+                  backgroundColor: theme.colorScheme.surfaceVariant,
+                  color: statusColor,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(children: [
+                Text(
+                  '${current}L / ${required}L',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontWeight: FontWeight.bold, color: statusColor),
+                ),
+                const Spacer(),
+                Text(
+                  '${(pct * 100).round()}%',
+                  style: theme.textTheme.bodySmall?.copyWith(color: statusColor),
+                ),
+              ]),
+              if (_missionSetBy != null)
+                Text('set by: $_missionSetBy',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.outline, fontSize: 10)),
+            ] else if (!isLeader)
+              Text('Awaiting mission objective from leader.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.outline,
+                          fontStyle: FontStyle.italic)),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _contribChip({
@@ -453,6 +610,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _syncStats = null;
       _counterLastBy = null;
       _peerNames.clear();
+      _missionDays = 0;
+      _missionSetBy = null;
       _roster = [];
       // _contentHashes persists across stop/start intentionally.
       _stopping = false;
@@ -648,6 +807,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                 ),
               ),
             ),
+
+            // ---- mission objective ----
+            if (hasNode) ...[
+              const SizedBox(height: 12),
+              _buildMissionCard(theme),
+            ],
 
             // ---- capabilities + node roster ----
             const SizedBox(height: 12),
