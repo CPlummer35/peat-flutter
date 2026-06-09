@@ -52,9 +52,9 @@ class PeatExampleApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'peat-water',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+      theme: ThemeData(colorSchemeSeed: const Color(0xFF2768D4), useMaterial3: true),
       darkTheme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
+        colorSchemeSeed: const Color(0xFF2768D4),
         useMaterial3: true,
         brightness: Brightness.dark,
       ),
@@ -1098,7 +1098,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
             child: CustomScrollView(
               slivers: [
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
             // ---- status / error banner ----
@@ -1117,50 +1117,56 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
               ),
 
             // ---- callsign + node start/stop on one line ----
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _callsignCtrl,
-                    focusNode: _callsignFocus,
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                    decoration: InputDecoration(
-                      hintText: 'Callsign',
-                      prefixIcon: GestureDetector(
-                        onTap: () => _callsignFocus.requestFocus(),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 4),
-                          child: Icon(Icons.edit_outlined, size: 18),
-                        ),
-                      ),
-                      prefixIconConstraints:
-                          const BoxConstraints(minWidth: 36, minHeight: 36),
-                      isDense: true,
-                      border: InputBorder.none,
-                      enabledBorder: const UnderlineInputBorder(),
-                      focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(
-                            color: theme.colorScheme.primary, width: 2),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                      suffixIcon: _callsignFocus.hasFocus
-                          ? GestureDetector(
+                  child: _callsignFocus.hasFocus
+                      // Edit mode: inline text field
+                      ? TextField(
+                          controller: _callsignCtrl,
+                          focusNode: _callsignFocus,
+                          autofocus: true,
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 2),
+                            border: InputBorder.none,
+                            focusedBorder: UnderlineInputBorder(
+                              borderSide: BorderSide(
+                                  color: theme.colorScheme.primary, width: 2),
+                            ),
+                            suffixIcon: GestureDetector(
                               onTap: () {
                                 _callsignCtrl.text = _callsignPrev;
                                 _callsignFocus.unfocus();
                               },
                               child: const Icon(Icons.close, size: 16),
-                            )
-                          : null,
-                    ),
-                    onSubmitted: (_) {
-                      if (hasNode) _publishSelf(_node!);
-                      _callsignFocus.unfocus();
-                    },
-                  ),
+                            ),
+                          ),
+                          onSubmitted: (_) {
+                            if (hasNode) _publishSelf(_node!);
+                            _callsignFocus.unfocus();
+                          },
+                        )
+                      // Display mode: tappable text
+                      : GestureDetector(
+                          onTap: () => _callsignFocus.requestFocus(),
+                          child: Row(children: [
+                            Text(
+                              _callsign,
+                              style: theme.textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(Icons.edit_outlined,
+                                size: 14,
+                                color: theme.colorScheme.outline),
+                          ]),
+                        ),
                 ),
                 const SizedBox(width: 10),
                 FilledButton(
