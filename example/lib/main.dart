@@ -110,6 +110,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   ];
   late List<String> _myCapabilities;
   late TextEditingController _callsignCtrl;
+  final FocusNode _callsignFocus = FocusNode();
+  String _callsignPrev = ''; // for cancel
   List<NodeInfo> _roster = [];
 
   // PN-Counter CRDT: each node maintains its own (inc, dec) slot so
@@ -148,6 +150,17 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _myCapabilities = ['comms'];
     }
     _callsignCtrl = TextEditingController(text: _hostName);
+    _callsignPrev = _hostName;
+    _callsignFocus.addListener(() {
+      if (_callsignFocus.hasFocus) {
+        _callsignPrev = _callsignCtrl.text;
+        // Select all so the user can just type to replace
+        _callsignCtrl.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _callsignCtrl.text.length,
+        );
+      }
+    });
   }
 
   Future<void> _startNode() async {
@@ -193,12 +206,20 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         setState(() {
           _peers = _node!.connectedPeers;
           _syncStats = _node!.syncStats;
-          // Show ALL nodes with valid IDs from the CRDT store — this is the
-          // G-Set: every node that has ever published itself appears here.
-          // Connection status (self/peer/offline) is shown as an indicator.
-          // Ghost cleanup (_cleanGhostNodes) handles stale entries separately.
+          // Show self, connected peers, and any node that published a
+          // heartbeat within the last 10 minutes. This is the G-Set CRDT
+          // view — all active/recent nodes — while excluding stale ghosts.
+          final recentCutoff = DateTime.now()
+              .subtract(const Duration(minutes: 10))
+              .millisecondsSinceEpoch;
           _roster = _node!.nodes
-              .where((n) => n.id.length >= 16 && seen.add(n.id))
+              .where((n) {
+                if (n.id.length < 16) return false;
+                if (!seen.add(n.id)) return false;
+                return n.id == _nodeId ||
+                    _peers.contains(n.id) ||
+                    n.lastHeartbeat >= recentCutoff;
+              })
               .toList();
         });
       });
@@ -652,6 +673,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     _counterTimer?.cancel();
     _changeLogTimer?.cancel();
     _callsignCtrl.dispose();
+    _callsignFocus.dispose();
     _node?.dispose();
     super.dispose();
   }
@@ -711,13 +733,20 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                 Expanded(
                   child: TextField(
                     controller: _callsignCtrl,
+                    focusNode: _callsignFocus,
                     style: theme.textTheme.titleMedium
                         ?.copyWith(fontWeight: FontWeight.bold),
                     decoration: InputDecoration(
                       hintText: 'Callsign',
-                      prefixIcon: const Icon(Icons.edit_outlined, size: 18),
+                      prefixIcon: GestureDetector(
+                        onTap: () => _callsignFocus.requestFocus(),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 4),
+                          child: Icon(Icons.edit_outlined, size: 18),
+                        ),
+                      ),
                       prefixIconConstraints:
-                          const BoxConstraints(minWidth: 32, minHeight: 0),
+                          const BoxConstraints(minWidth: 36, minHeight: 36),
                       isDense: true,
                       border: InputBorder.none,
                       enabledBorder: const UnderlineInputBorder(),
@@ -726,8 +755,20 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                             color: theme.colorScheme.primary, width: 2),
                       ),
                       contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                      suffixIcon: _callsignFocus.hasFocus
+                          ? GestureDetector(
+                              onTap: () {
+                                _callsignCtrl.text = _callsignPrev;
+                                _callsignFocus.unfocus();
+                              },
+                              child: const Icon(Icons.close, size: 16),
+                            )
+                          : null,
                     ),
-                    onSubmitted: (_) { if (hasNode) _publishSelf(_node!); },
+                    onSubmitted: (_) {
+                      if (hasNode) _publishSelf(_node!);
+                      _callsignFocus.unfocus();
+                    },
                   ),
                 ),
                 const SizedBox(width: 10),
