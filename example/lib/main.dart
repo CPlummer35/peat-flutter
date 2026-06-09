@@ -109,6 +109,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     'recon', 'medical', 'transport',  // field roles
   ];
   late List<String> _myCapabilities;
+  late TextEditingController _callsignCtrl;
   List<NodeInfo> _roster = [];
 
   // PN-Counter CRDT: each node maintains its own (inc, dec) slot so
@@ -138,21 +139,24 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     super.initState();
     if (Platform.isIOS) {
       _hostName = 'iPhone (simulator)';
-      _myCapabilities = ['recon', 'medical'];  // field node
+      _myCapabilities = ['recon', 'medical'];
     } else if (Platform.isMacOS) {
       _hostName = 'macOS · ${Platform.localHostname.split('.').first}';
-      _myCapabilities = ['leader', 'comms', 'logistics'];  // command post
+      _myCapabilities = ['leader', 'comms', 'logistics'];
     } else {
       _hostName = Platform.operatingSystem;
       _myCapabilities = ['comms'];
     }
+    _callsignCtrl = TextEditingController(text: _hostName);
   }
 
   Future<void> _startNode() async {
-    setState(() {
-      _starting = true;
-      _error = null;
-    });
+    if (_startRetries == 0) {
+      setState(() {
+        _starting = true;
+        _error = null;
+      });
+    }
     try {
       final dir = await getApplicationSupportDirectory();
       final node = PeatFlutterNode.create(NodeConfig(
@@ -275,15 +279,28 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         _starting = false;
       });
     } catch (e) {
+      final msg = e.toString();
+      // redb file lock still held by winding-down background tasks.
+      // Auto-retry silently up to 6× (3s window) before surfacing the error.
+      if ((msg.contains('redb') || msg.contains('storage') ||
+              msg.contains('StorageError')) &&
+          _startRetries < 6) {
+        _startRetries++;
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted && _starting) _startNode();
+        return;
+      }
+      _startRetries = 0;
       setState(() {
         _error = e is UnimplementedError
-            ? 'Run `just gen-bindings` to generate Rust→Dart FFI bindings, '
-                'then rebuild the example.'
+            ? 'Run `just gen-bindings` to regenerate FFI bindings.'
             : 'Failed to start node: $e';
         _starting = false;
       });
     }
   }
+
+  int _startRetries = 0;
 
   void _refreshMission(PeatFlutterNode node) {
     try {
@@ -312,10 +329,14 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     });
   }
 
+  String get _callsign => _callsignCtrl.text.trim().isEmpty
+      ? _hostName
+      : _callsignCtrl.text.trim();
+
   void _publishSelf(PeatFlutterNode node) {
     final id = node.nodeId;
     _cleanGhostNodes(node);
-    node.publishSelf(nodeId: id, name: _hostName, capabilities: _myCapabilities);
+    node.publishSelf(nodeId: id, name: _callsign, capabilities: _myCapabilities);
   }
 
   void _cleanGhostNodes(PeatFlutterNode node) {
@@ -596,7 +617,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     _counterTimer?.cancel();
     _changeLogTimer?.cancel();
     try { _node?.dispose(); } catch (_) {}
-    Future.delayed(const Duration(seconds: 5), () {
+    Future.delayed(const Duration(seconds: 8), () {
       if (mounted) setState(() => _stopping = false);
     });
     setState(() {
@@ -629,6 +650,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     _peerTimer?.cancel();
     _counterTimer?.cancel();
     _changeLogTimer?.cancel();
+    _callsignCtrl.dispose();
     _node?.dispose();
     super.dispose();
   }
@@ -678,23 +700,36 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                 ),
               ),
 
+            // ---- callsign (always editable) ----
+            const SizedBox(height: 8),
+            TextField(
+              controller: _callsignCtrl,
+              decoration: InputDecoration(
+                labelText: 'Callsign',
+                prefixIcon: const Icon(Icons.badge_outlined),
+                isDense: true,
+                border: const OutlineInputBorder(),
+                suffix: hasNode
+                    ? GestureDetector(
+                        onTap: () { _publishSelf(_node!); },
+                        child: Text('update',
+                            style: theme.textTheme.labelSmall
+                                ?.copyWith(color: theme.colorScheme.primary)),
+                      )
+                    : null,
+              ),
+              onSubmitted: (_) { if (hasNode) _publishSelf(_node!); },
+            ),
+
             if (_nodeId != null) ...[
               const SizedBox(height: 4),
               Row(children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('$_hostName',
-                          style: theme.textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                      Text(
-                        '${_nodeId!.substring(0, 8)}…${_nodeId!.substring(_nodeId!.length - 8)}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                            fontFamily: 'monospace',
-                            color: theme.colorScheme.outline),
-                      ),
-                    ],
+                  child: Text(
+                    '${_nodeId!.substring(0, 8)}…${_nodeId!.substring(_nodeId!.length - 8)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        fontFamily: 'monospace',
+                        color: theme.colorScheme.outline),
                   ),
                 ),
                 if (_syncStats != null)
@@ -894,16 +929,19 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                             ),
                             const SizedBox(width: 6),
                             Expanded(
-                              child: Text(
-                                n.name,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontWeight: isMe
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  color: isConnected
-                                      ? null
-                                      : theme.colorScheme.outline,
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    n.name, // callsign
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: isConnected
+                                          ? null
+                                          : theme.colorScheme.outline,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             Wrap(
