@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, Directory;
 import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
@@ -127,8 +127,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   // offline edits from multiple nodes merge additively on reconnect.
   // Total = Σ (inc_i - dec_i) across all nodes.
   static const _counterCollection = 'demo';
-  // My own slot key — unique per node: "counter-macOS·H42" etc.
-  String get _myCounterDoc => 'counter-${_hostName.replaceAll(' ', '_').replaceAll('·', '-')}';
+  // My own slot key — keyed on the NODE ID (unique crypto key) so that
+  // two iOS devices with the same hostname don't collide.
+  String _myCounterDocKey = ''; // set in _startNode from node.nodeId
+  String get _myCounterDoc => _myCounterDocKey.isNotEmpty
+      ? _myCounterDocKey
+      : 'counter-${_hostName.replaceAll(' ', '_').replaceAll('·', '-')}';
   int _myInc = 0;
   int _myDec = 0;
   bool _counterDirty = false; // local edits not yet flushed to store
@@ -206,6 +210,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _startBle(node); // auto-start BLE on all platforms
 
       _sessionStartMs = DateTime.now().millisecondsSinceEpoch;
+      // Key the counter slot on the unique node ID so two iOS devices
+      // with the same hostname don't collide in the store.
+      _myCounterDocKey = 'counter-${node.nodeId.substring(0, 16)}';
       // On connect: flush offline edits + read peer contributions.
       _refreshCounter(node);
       _counterTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
@@ -412,6 +419,35 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   String get _callsign => _callsignCtrl.text.trim().isEmpty
       ? _hostName
       : _callsignCtrl.text.trim();
+
+  Future<void> _resetDatabase() async {
+    if (_node != null) return; // must be stopped first
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final peatDir = Directory('${dir.path}/peat');
+      if (await peatDir.exists()) {
+        await peatDir.delete(recursive: true);
+      }
+      // Reset in-memory counter state
+      setState(() {
+        _myInc = 0;
+        _myDec = 0;
+        _counterDirty = false;
+        _peerContributions.clear();
+        _peerNames.clear();
+        _changeLog.clear();
+        _contentHashes.clear();
+        _claimedCommandIds.clear();
+        _commands = [];
+        _activeCell = null;
+        _missionDays = 0;
+        _missionSetBy = null;
+        _error = null;
+      });
+    } catch (e) {
+      setState(() => _error = 'Reset failed: $e');
+    }
+  }
 
   void _publishSelf(PeatFlutterNode node) {
     final id = node.nodeId;
@@ -999,6 +1035,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _peers = [];
       _syncStats = null;
       _counterLastBy = null;
+      _myCounterDocKey = '';
       _peerNames.clear();
       _missionDays = 0;
       _missionSetBy = null;
@@ -1582,6 +1619,39 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 8),
+                const Divider(),
+                const SizedBox(height: 4),
+                Text('Reset', style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold, color: Colors.red)),
+                const SizedBox(height: 4),
+                Text(
+                  'Stop the node on ALL devices before resetting. '
+                  'If any peer is still running, it will sync its data back.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.outline),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: hasNode ? null : _resetDatabase,
+                  icon: const Icon(Icons.delete_forever_outlined,
+                      size: 16, color: Colors.red),
+                  label: Text(
+                    hasNode ? 'Stop node first' : 'Reset local database',
+                    style: TextStyle(
+                        color: hasNode ? theme.colorScheme.outline : Colors.red,
+                        fontSize: 13),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                        color: hasNode
+                            ? theme.colorScheme.outline.withOpacity(0.3)
+                            : Colors.red.withOpacity(0.5)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    minimumSize: const Size(0, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Text('© 2026 Defense Unicorns',
                     style: theme.textTheme.bodySmall
                         ?.copyWith(color: theme.colorScheme.outline)),
