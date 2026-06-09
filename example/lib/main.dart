@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:peat_flutter/peat_flutter.dart';
 import 'package:peat_flutter/src/generated/peat_ffi.dart' show SyncStats;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// A single document change event for the activity feed.
 class _ChangeEntry {
@@ -151,6 +152,16 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     }
     _callsignCtrl = TextEditingController(text: _hostName);
     _callsignPrev = _hostName;
+    // Load persisted callsign (overrides hostname default if saved)
+    SharedPreferences.getInstance().then((prefs) {
+      final saved = prefs.getString('callsign');
+      if (saved != null && saved.isNotEmpty && mounted) {
+        setState(() {
+          _callsignCtrl.text = saved;
+          _callsignPrev = saved;
+        });
+      }
+    });
     _callsignFocus.addListener(() {
       if (_callsignFocus.hasFocus) {
         _callsignPrev = _callsignCtrl.text;
@@ -372,6 +383,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     final id = node.nodeId;
     _cleanGhostNodes(node);
     node.publishSelf(nodeId: id, name: _callsign, capabilities: _myCapabilities);
+    // Persist callsign so it survives app restarts
+    SharedPreferences.getInstance()
+        .then((p) => p.setString('callsign', _callsign));
   }
 
   void _cleanGhostNodes(PeatFlutterNode node) {
@@ -449,6 +463,26 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     } else {
       setState(() => _counterDirty = true);
     }
+  }
+
+  Widget _aboutRow(ThemeData theme, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [
+        SizedBox(
+          width: 80,
+          child: Text(label,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.outline)),
+        ),
+        Expanded(
+          child: Text(value,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(fontFamily: 'monospace'),
+              overflow: TextOverflow.ellipsis),
+        ),
+      ]),
+    );
   }
 
   Widget _buildMissionCard(ThemeData theme) {
@@ -697,7 +731,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     final theme = Theme.of(context);
 
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
       resizeToAvoidBottomInset: false, // keyboard overlays; CustomScrollView handles scroll
       appBar: AppBar(
@@ -708,6 +742,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
           tabs: [
             Tab(icon: Icon(Icons.water_drop, size: 18), text: 'Operations'),
             Tab(icon: Icon(Icons.timeline, size: 18), text: 'Activity'),
+            Tab(icon: Icon(Icons.info_outline, size: 18), text: 'About'),
           ],
         ),
       ),
@@ -885,7 +920,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                               style: theme.textTheme.displaySmall
                                   ?.copyWith(fontWeight: FontWeight.bold),
                             ),
-                            Text('litres total',
+                            Text('liters total',
                                 style: theme.textTheme.labelSmall
                                     ?.copyWith(color: theme.colorScheme.outline)),
                           ],
@@ -1191,6 +1226,77 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                     ),
             ),
           ]), // Column (Activity tab)
+
+          // ── Tab 2: About ─────────────────────────────────────────────
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Branding
+                Row(children: [
+                  const Text('💧', style: TextStyle(fontSize: 32)),
+                  const SizedBox(width: 12),
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('peat-water',
+                        style: theme.textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                    Text('powered by peat mesh',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.outline)),
+                  ]),
+                ]),
+                const SizedBox(height: 12),
+                Text(
+                  'A demonstration of Defense Unicorns\' Peat mesh protocol — '
+                  'a secure, peer-to-peer, CRDT-based data synchronization '
+                  'framework designed for disconnected and degraded network '
+                  'environments.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'This demo shows real-time water supply tracking across a '
+                  'mesh of nodes using a PN-Counter CRDT, with leader-assigned '
+                  'mission objectives and automatic peer discovery via mDNS.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.outline),
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 8),
+                // Node info
+                Text('This Node',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                if (_nodeId != null) ...[
+                  _aboutRow(theme, 'Node ID', _nodeId!),
+                  _aboutRow(theme, 'Callsign', _callsign),
+                ],
+                if (_syncStats != null) ...[
+                  _aboutRow(theme, 'Sent', '${_syncStats!.bytesSent} B'),
+                  _aboutRow(theme, 'Received', '${_syncStats!.bytesReceived} B'),
+                  _aboutRow(theme, 'Peers', '${_peers.length} connected'),
+                ],
+                if (_nodeId == null)
+                  Text('Start a node to see details.',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.outline,
+                              fontStyle: FontStyle.italic)),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 8),
+                Text('© 2026 Defense Unicorns',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.outline)),
+                Text('github.com/defenseunicorns/peat-flutter',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.outline,
+                            fontFamily: 'monospace')),
+              ],
+            ),
+          ),
 
           ], // TabBarView children
         ), // TabBarView
