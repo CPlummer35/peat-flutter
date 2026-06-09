@@ -19,7 +19,11 @@ export 'generated/peat_ffi.dart'
         PeerInfo,
         PeerTransportState,
         NodeInfo,
-        NodeStatus;
+        NodeStatus,
+        CellInfo,
+        CellStatus,
+        CommandInfo,
+        CommandStatus;
 
 final _rng = Random();
 
@@ -111,6 +115,22 @@ class PeatFlutterNode {
   /// Remove a stale node entry from the local store.
   void deleteNode(String nodeId) =>
       _node.deleteDocument('nodes', nodeId);
+
+  // ── Cell ──────────────────────────────────────────────────────────────
+
+  /// Publish a cell (team) into the mesh.
+  void putCell(CellInfo cell) => _node.putCell(cell);
+
+  /// All cells known to the mesh.
+  List<CellInfo> get cells => _node.getCells();
+
+  // ── Command ───────────────────────────────────────────────────────────
+
+  /// Publish a command into the mesh.
+  void putCommand(CommandInfo cmd) => _node.putCommand(cmd);
+
+  /// All commands known to the mesh.
+  List<CommandInfo> get commands => _node.getCommands();
 
   /// Number of currently connected peers.
   int get peerCount => _node.peerCount();

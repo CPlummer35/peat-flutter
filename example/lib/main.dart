@@ -90,6 +90,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   SyncStats? _syncStats;
   Timer? _peerTimer;
 
+  // Cell and Command state
+  CellInfo? _activeCell;
+  List<CommandInfo> _commands = [];
+
   // Mission objective (leader-set, shared via CRDT)
   static const _missionCollection = 'mission';
   static const _missionDocId = 'objective';
@@ -219,6 +223,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         }
         // Clean up ghost entries that may have synced in from the peer.
         _cleanGhostNodes(_node!);
+        // Refresh cell and command state.
+        try {
+          final cells = _node!.cells;
+          final cmds = _node!.commands;
+          if (mounted) setState(() {
+            _activeCell = cells.isNotEmpty ? cells.first : null;
+            _commands = cmds;
+          });
+        } catch (_) {}
 
         final seen = <String>{};
         setState(() {
@@ -465,6 +478,262 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     }
   }
 
+  // ── Cell card ────────────────────────────────────────────────────────
+
+  void _formCell() {
+    final node = _node;
+    if (node == null) return;
+    final allCaps = _roster
+        .expand((n) => n.capabilities)
+        .toSet()
+        .toList();
+    final leader = _roster
+        .firstWhere((n) => n.capabilities.contains('leader'),
+            orElse: () => _roster.first)
+        .id;
+    node.putCell(CellInfo(
+      id: 'alpha-cell',
+      name: 'Alpha Cell',
+      status: CellStatus.active,
+      nodeCount: _roster.length,
+      centerLat: 0,
+      centerLon: 0,
+      capabilities: allCaps,
+      formationId: null,
+      leaderId: leader,
+      lastUpdate: DateTime.now().millisecondsSinceEpoch,
+      scenarioCommand: null,
+    ));
+  }
+
+  Widget _buildCellCard(ThemeData theme) {
+    final cell = _activeCell;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.groups_outlined, size: 16),
+              const SizedBox(width: 6),
+              Text('Cell Formation',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              if (_myCapabilities.contains('leader'))
+                FilledButton(
+                  onPressed: _roster.isNotEmpty ? _formCell : null,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(cell != null ? 'Reform' : 'Form Cell',
+                      style: const TextStyle(fontSize: 12)),
+                ),
+            ]),
+            const SizedBox(height: 6),
+            if (cell != null) ...[
+              Row(children: [
+                Container(
+                  width: 8, height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: cell.status == CellStatus.active
+                        ? Colors.green
+                        : Colors.orange,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(cell.name,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Text('${cell.nodeCount} nodes',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.outline)),
+              ]),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                children: cell.capabilities.take(6).map((c) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(c,
+                      style: theme.textTheme.labelSmall
+                          ?.copyWith(fontSize: 10,
+                              color: theme.colorScheme.onPrimaryContainer)),
+                )).toList(),
+              ),
+            ] else
+              Text(
+                _myCapabilities.contains('leader')
+                    ? 'Tap "Form Cell" to organize the roster into a formal unit.'
+                    : 'Awaiting cell formation from leader.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.outline,
+                        fontStyle: FontStyle.italic),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Command card ─────────────────────────────────────────────────────
+
+  void _issueWaterRequest(int quantity) {
+    final node = _node;
+    if (node == null) return;
+    final id = 'req-${DateTime.now().millisecondsSinceEpoch}';
+    node.putCommand(CommandInfo(
+      id: id,
+      commandType: 'WATER_REQUEST',
+      targetId: 'leader',
+      parameters: '{"quantity": $quantity, "from": "$_callsign"}',
+      priority: 1,
+      status: CommandStatus.pending,
+      originator: _nodeId ?? '',
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      lastUpdate: DateTime.now().millisecondsSinceEpoch,
+    ));
+  }
+
+  void _fulfillCommand(CommandInfo cmd) {
+    final node = _node;
+    if (node == null) return;
+    // Mark fulfilled and add water
+    node.putCommand(CommandInfo(
+      id: cmd.id,
+      commandType: cmd.commandType,
+      targetId: cmd.targetId,
+      parameters: cmd.parameters,
+      priority: cmd.priority,
+      status: CommandStatus.completed,
+      originator: cmd.originator,
+      createdAt: cmd.createdAt,
+      lastUpdate: DateTime.now().millisecondsSinceEpoch,
+    ));
+    // Parse quantity and add to water supply
+    try {
+      final params = jsonDecode(cmd.parameters) as Map<String, dynamic>;
+      final qty = params['quantity'] as int? ?? 0;
+      for (var i = 0; i < qty; i++) {
+        _writeCounter(node, true);
+      }
+    } catch (_) {}
+  }
+
+  Widget _buildCommandCard(ThemeData theme) {
+    final isLeader = _myCapabilities.contains('leader');
+    final pending = _commands
+        .where((c) => c.status == CommandStatus.pending)
+        .toList();
+    final recent = _commands
+        .where((c) => c.status != CommandStatus.pending)
+        .take(2)
+        .toList();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.send_outlined, size: 16),
+              const SizedBox(width: 6),
+              Text('Resupply Requests',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              if (!isLeader)
+                FilledButton(
+                  onPressed: _node != null
+                      ? () => _issueWaterRequest(5)
+                      : null,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Request 5L',
+                      style: TextStyle(fontSize: 12)),
+                ),
+            ]),
+            const SizedBox(height: 6),
+            if (pending.isEmpty && recent.isEmpty)
+              Text(
+                isLeader
+                    ? 'No pending resupply requests.'
+                    : 'Tap "Request 5L" to ask the leader for resupply.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.outline,
+                        fontStyle: FontStyle.italic),
+              ),
+            ...pending.map((cmd) {
+              final params = _parseParams(cmd.parameters);
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(children: [
+                  Container(width: 8, height: 8,
+                      decoration: const BoxDecoration(
+                          shape: BoxShape.circle, color: Colors.orange)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${params['from'] ?? 'unknown'} requests ${params['quantity']}L',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                  if (isLeader)
+                    GestureDetector(
+                      onTap: () => _fulfillCommand(cmd),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text('Fulfill',
+                            style: theme.textTheme.labelSmall
+                                ?.copyWith(color: Colors.green)),
+                      ),
+                    ),
+                ]),
+              );
+            }),
+            ...recent.map((cmd) {
+              final params = _parseParams(cmd.parameters);
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [
+                  Icon(Icons.check_circle_outline, size: 14,
+                      color: theme.colorScheme.outline),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${params['from'] ?? '?'} +${params['quantity']}L — fulfilled',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.outline),
+                  ),
+                ]),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Map<String, dynamic> _parseParams(String params) {
+    try { return jsonDecode(params) as Map<String, dynamic>; }
+    catch (_) { return {}; }
+  }
+
   Widget _aboutRow(ThemeData theme, String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -702,6 +971,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _peerNames.clear();
       _missionDays = 0;
       _missionSetBy = null;
+      _activeCell = null;
+      _commands = [];
       _roster = [];
       // _contentHashes persists across stop/start intentionally.
       _stopping = false;
@@ -944,6 +1215,18 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
             if (hasNode) ...[
               const SizedBox(height: 12),
               _buildMissionCard(theme),
+            ],
+
+            // ---- cell formation ----
+            if (hasNode) ...[
+              const SizedBox(height: 10),
+              _buildCellCard(theme),
+            ],
+
+            // ---- command / resupply ----
+            if (hasNode) ...[
+              const SizedBox(height: 10),
+              _buildCommandCard(theme),
             ],
 
             // ---- capabilities + node roster ----
@@ -1212,10 +1495,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Branding
-                Row(children: [
-                  const Text('💧', style: TextStyle(fontSize: 32)),
-                  const SizedBox(width: 12),
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Center(
+                  child: Image.asset('PEAT.png', width: 100, height: 100),
+                ),
+                const SizedBox(height: 8),
+                Center(
+                  child: Column(children: [
                     Text('peat-water',
                         style: theme.textTheme.headlineSmall
                             ?.copyWith(fontWeight: FontWeight.bold)),
@@ -1223,7 +1508,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: theme.colorScheme.outline)),
                   ]),
-                ]),
+                ),
                 const SizedBox(height: 12),
                 Text(
                   'A demonstration of Defense Unicorns\' Peat mesh protocol — '

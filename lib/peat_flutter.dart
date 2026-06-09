@@ -12,7 +12,11 @@ export 'src/peat_node.dart'
         PeerInfo,
         PeerTransportState,
         NodeInfo,
-        NodeStatus;
+        NodeStatus,
+        CellInfo,
+        CellStatus,
+        CommandInfo,
+        CommandStatus;
 
 /// Opens the peat_ffi native library for the current platform.
 ///
