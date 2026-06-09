@@ -197,8 +197,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       // Publish this node's presence into the mesh.
       _publishSelf(node);
 
+      var _heartbeatTick = 0;
       _peerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
         if (!mounted || _node == null) return;
+        // Re-publish self every 2 min to keep heartbeat fresh for peers.
+        _heartbeatTick++;
+        if (_heartbeatTick >= 60) { // 60 × 2s = 120s
+          _heartbeatTick = 0;
+          _publishSelf(_node!);
+        }
         // Clean up ghost entries that may have synced in from the peer.
         _cleanGhostNodes(_node!);
 
@@ -206,21 +213,27 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         setState(() {
           _peers = _node!.connectedPeers;
           _syncStats = _node!.syncStats;
-          // Show self, connected peers, and any node that published a
-          // heartbeat within the last 10 minutes. This is the G-Set CRDT
-          // view — all active/recent nodes — while excluding stale ghosts.
+          // Show self, connected peers, and nodes heartbeat'd within 10 min.
+          // Deduplicate by callsign (name), keeping the most recent entry —
+          // prevents duplicate rows when the same device reconnects with a
+          // new node ID within the heartbeat window.
           final recentCutoff = DateTime.now()
-              .subtract(const Duration(minutes: 10))
+              .subtract(const Duration(minutes: 3))
               .millisecondsSinceEpoch;
-          _roster = _node!.nodes
-              .where((n) {
-                if (n.id.length < 16) return false;
-                if (!seen.add(n.id)) return false;
-                return n.id == _nodeId ||
-                    _peers.contains(n.id) ||
-                    n.lastHeartbeat >= recentCutoff;
-              })
-              .toList();
+          final allNodes = _node!.nodes
+              .where((n) =>
+                  n.id.length >= 16 &&
+                  (n.id == _nodeId ||
+                      _peers.contains(n.id) ||
+                      n.lastHeartbeat >= recentCutoff))
+              .toList()
+            ..sort((a, b) => b.lastHeartbeat.compareTo(a.lastHeartbeat));
+          // Keep most-recent entry per callsign name
+          final byName = <String, NodeInfo>{};
+          for (final n in allNodes) {
+            byName[n.name] ??= n;
+          }
+          _roster = byName.values.toList();
         });
       });
 
