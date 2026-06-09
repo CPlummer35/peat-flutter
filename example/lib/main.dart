@@ -93,6 +93,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   // Cell and Command state
   CellInfo? _activeCell;
   List<CommandInfo> _commands = [];
+  // Track command IDs we've already claimed so we don't double-increment.
+  final Set<String> _claimedCommandIds = {};
 
   // Mission objective (leader-set, shared via CRDT)
   static const _missionCollection = 'mission';
@@ -231,6 +233,22 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
             _activeCell = cells.isNotEmpty ? cells.first : null;
             _commands = cmds;
           });
+          // Auto-claim any fulfilled resupply requests addressed to this node.
+          // The leader decremented their supply; we increment ours to receive it.
+          for (final cmd in cmds) {
+            if (cmd.status == CommandStatus.completed &&
+                cmd.commandType == 'WATER_REQUEST' &&
+                !_claimedCommandIds.contains(cmd.id)) {
+              final params = _parseParams(cmd.parameters);
+              if (params['from'] == _callsign) {
+                final qty = params['quantity'] as int? ?? 0;
+                _claimedCommandIds.add(cmd.id);
+                for (var i = 0; i < qty; i++) {
+                  _writeCounter(_node, true); // receive water
+                }
+              }
+            }
+          }
         } catch (_) {}
 
         final seen = <String>{};
@@ -606,7 +624,16 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
   void _fulfillCommand(CommandInfo cmd) {
     final node = _node;
     if (node == null) return;
-    // Mark fulfilled and add water
+    // Leader DECREMENTS their own supply (giving water away).
+    // The requester will auto-increment their slot when they see COMPLETED.
+    try {
+      final params = jsonDecode(cmd.parameters) as Map<String, dynamic>;
+      final qty = params['quantity'] as int? ?? 0;
+      for (var i = 0; i < qty; i++) {
+        _writeCounter(node, false); // leader gives (dec)
+      }
+    } catch (_) {}
+    // Mark command as completed so the requester can claim it.
     node.putCommand(CommandInfo(
       id: cmd.id,
       commandType: cmd.commandType,
@@ -618,14 +645,6 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       createdAt: cmd.createdAt,
       lastUpdate: DateTime.now().millisecondsSinceEpoch,
     ));
-    // Parse quantity and add to water supply
-    try {
-      final params = jsonDecode(cmd.parameters) as Map<String, dynamic>;
-      final qty = params['quantity'] as int? ?? 0;
-      for (var i = 0; i < qty; i++) {
-        _writeCounter(node, true);
-      }
-    } catch (_) {}
   }
 
   Widget _buildCommandCard(ThemeData theme) {
@@ -973,6 +992,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _missionSetBy = null;
       _activeCell = null;
       _commands = [];
+      _claimedCommandIds.clear();
       _roster = [];
       // _contentHashes persists across stop/start intentionally.
       _stopping = false;
