@@ -193,6 +193,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
       _starting = true;
       _error = null;
     });
+    // Give the previous session's Tokio tasks time to drain and release
+    // the redb file lock before we attempt to open it.
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted || !_starting) return; // user cancelled while waiting
     try {
       final dir = await getApplicationSupportDirectory();
       final node = PeatFlutterNode.create(NodeConfig(
@@ -1028,7 +1032,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     _counterTimer?.cancel();
     _changeLogTimer?.cancel();
     try { _node?.dispose(); } catch (_) {}
-    Future.delayed(const Duration(seconds: 8), () {
+    Future.delayed(const Duration(seconds: 5), () {
       if (mounted) setState(() => _stopping = false);
     });
     setState(() {
@@ -1177,14 +1181,23 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
                     minimumSize: const Size(0, 36),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  child: Text(
-                    _starting
-                        ? 'Starting…'
-                        : (_stopping
-                            ? 'Stopping…'
-                            : (hasNode ? 'Stop' : 'Start')),
-                    style: const TextStyle(fontSize: 13),
-                  ),
+                  child: (_starting || _stopping)
+                      ? Row(mainAxisSize: MainAxisSize.min, children: [
+                          SizedBox(
+                            width: 12, height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: Theme.of(context).colorScheme.onPrimary,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _stopping ? 'Stopping…' : 'Starting…',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ])
+                      : Text(hasNode ? 'Stop' : 'Start',
+                          style: const TextStyle(fontSize: 13)),
                 ),
               ],
             ),
