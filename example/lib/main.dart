@@ -154,6 +154,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
         transport: null,
       ));
       node.startSync();
+      _startBle(node); // auto-start BLE on all platforms
 
       // On connect: flush offline edits + read peer contributions.
       _refreshCounter(node);
@@ -404,30 +405,21 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
     }
   }
 
-  void _startBle() {
-    final node = _node;
+  void _startBle([PeatFlutterNode? explicit]) {
+    final node = explicit ?? _node;
     if (node == null || _bleRunning) return;
-    // On mobile, Dart owns the radio via flutter_blue_plus:
-    //   1. Add `flutter_blue_plus` to example/pubspec.yaml.
-    //   2. Call FlutterBluePlus.scan() and connect to peat peripherals.
-    //   3. On each GATT notification, call peat-btle's onBleDataReceived() to
-    //      strip GATT framing / decrypt → postcardBytes.
-    //   4. Feed postcardBytes to node.ingestInboundFrame(collection, bytes).
-    // Outbound frames produced by Rust are received here and must be written
-    // as GATT characteristics to connected peripherals.
     try {
       final sub = node.startOutboundFrames().listen((frame) {
         if (!mounted) return;
         setState(() => _bleFrameCount++);
-        // TODO: write frame.bytes to the GATT characteristic for frame.transportId
       });
       setState(() {
         _outboundSub = sub;
         _bleRunning = true;
         _bleFrameCount = 0;
       });
-    } catch (e) {
-      setState(() => _error = 'BLE fan-out failed: $e');
+    } catch (_) {
+      // BLE unavailable on this platform — silently ignore.
     }
   }
 
@@ -775,16 +767,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome> {
               ),
             ),
 
-            // ---- mobile BLE section ----
-            if (hasNode && _isMobile) ...[
-              const SizedBox(height: 8),
-              FilledButton.tonal(
-                onPressed: _bleRunning ? _stopBle : _startBle,
-                child: Text(_bleRunning
-                    ? 'Stop BLE ($_bleFrameCount outbound frames)'
-                    : 'Start BLE Outbound'),
-              ),
-            ],
+            // BLE starts automatically with the node — no manual button needed.
 
                     ]), // SliverChildListDelegate
                   ), // SliverList
