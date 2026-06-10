@@ -39,20 +39,16 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-  end
-  # Force-load peat_ffi static library symbols in all build configs.
-  # DynamicLibrary.process() looks them up at runtime; without -all_load
-  # the release linker strips them as unreferenced dead code.
-  installer.aggregate_targets.each do |agg_target|
-    agg_target.user_project.targets.each do |target|
-      next unless target.name == 'Runner'
+    # Keep peat_ffi's runtime-only C FFI symbols from being dead-stripped
+    # out of the peat_flutter.framework during release linking.
+    if target.name == 'peat_flutter'
       target.build_configurations.each do |config|
-        existing = config.build_settings['OTHER_LDFLAGS'] || '$(inherited)'
-        unless existing.include?('-all_load')
-          config.build_settings['OTHER_LDFLAGS'] = "#{existing} -all_load"
-        end
+        config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
+        ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+        ldflags = [ldflags] if ldflags.is_a?(String)
+        ldflags << '-all_load' unless ldflags.include?('-all_load')
+        config.build_settings['OTHER_LDFLAGS'] = ldflags
       end
     end
-    agg_target.user_project.save
   end
 end
