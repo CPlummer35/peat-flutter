@@ -39,16 +39,40 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-    # Keep peat_ffi's runtime-only C FFI symbols from being dead-stripped
-    # out of the peat_flutter.framework during release linking.
-    if target.name == 'peat_flutter'
+  end
+
+  # peat_flutter is a source-less FFI pod: its vendored static libpeat_ffi.a
+  # links straight into the Runner executable (no peat_flutter.framework).
+  # In release, dead-code stripping drops the whole unreferenced archive —
+  # nothing in Swift/ObjC calls the C FFI entry points; they're only resolved
+  # at runtime via DynamicLibrary.process() → dlsym(RTLD_DEFAULT, ...).
+  #
+  # Fix on the Runner (app) target:
+  #   -all_load            force-link every symbol from the static archive
+  #   -export_dynamic      keep them in the executable's dynamic symbol table
+  #                        so dlsym can find them
+  #   DEAD_CODE_STRIPPING=NO / STRIP_INSTALLED_PRODUCT=NO  stop the release
+  #                        strip phase from removing them afterward
+  #   -framework ...       satisfy the now-forced peat-ffi Rust dep references
+  installer.aggregate_targets.each do |agg|
+    agg.user_project.native_targets.each do |target|
+      next unless target.name == 'Runner'
       target.build_configurations.each do |config|
         config.build_settings['DEAD_CODE_STRIPPING'] = 'NO'
-        ldflags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
-        ldflags = [ldflags] if ldflags.is_a?(String)
-        ldflags << '-all_load' unless ldflags.include?('-all_load')
-        config.build_settings['OTHER_LDFLAGS'] = ldflags
+        config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
+        flags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+        flags = [flags] if flags.is_a?(String)
+        [
+          '-all_load',
+          '-Xlinker', '-export_dynamic',
+          '-framework', 'Network',
+          '-framework', 'Security',
+          '-framework', 'SystemConfiguration',
+          '-framework', 'CoreBluetooth',
+        ].each { |f| flags << f }
+        config.build_settings['OTHER_LDFLAGS'] = flags
       end
     end
+    agg.user_project.save
   end
 end

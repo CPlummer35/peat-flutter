@@ -28,20 +28,14 @@ Pod::Spec.new do |s|
   #   CoreBluetooth    — peat-btle BLE transport
   s.frameworks = 'Network', 'Security', 'SystemConfiguration', 'CoreBluetooth'
 
-  # The vendored static xcframework (.a) is linked INTO the dynamic
-  # peat_flutter.framework at this pod's link step. Release builds enable
-  # dead-code stripping, which drops the C FFI symbols (ffi_peat_*,
-  # uniffi_ffibuffer_*) because nothing in Swift/ObjC references them —
-  # they're only resolved at runtime via DynamicLibrary.process().
-  #
-  # Fix on the POD target (not the app target): -all_load force-links every
-  # symbol from the static archive into the framework, and DEAD_CODE_STRIPPING
-  # = NO keeps the linker from pruning them afterward. This must be on
-  # pod_target_xcconfig because that's where the .a → framework link happens.
+  # peat_flutter has no compiled sources — the vendored static libpeat_ffi.a
+  # links directly into the Runner executable. The force-load / no-strip /
+  # -export_dynamic flags that keep its runtime-only C FFI symbols alive must
+  # therefore go on the Runner (app) target; see example/ios/Podfile
+  # post_install. Here we only declare link deps the static archive needs.
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'OTHER_LDFLAGS' => '-lc++ -lresolv -all_load',
-    'DEAD_CODE_STRIPPING' => 'NO',
+    'OTHER_LDFLAGS' => '-lc++ -lresolv',
   }
 end
