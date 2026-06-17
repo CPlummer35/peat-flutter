@@ -192,6 +192,11 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // and survive restarts. A transfer (fulfill) is requestor-entry +qty /
   // leader-entry -qty → the sum is unchanged.
   static const _holdingsCollection = 'holdings';
+  // Node-layer collection used to bridge CRDT-KV updates over the Iroh/Wi-Fi
+  // mesh. The custom 0xAF CRDT frames only travel over BLE; on desktop and the
+  // iOS simulator (no BLE radio) that path is dead, so without this bridge the
+  // CRDT-KV collections (holdings, commands, mission) never cross devices.
+  static const _kCrdtBridgeCollection = 'crdtbridge';
   // Build signature injected at compile time (--dart-define=PEAT_BUILD_ID=...).
   // When it differs from the last value we started with, the app binary was
   // redeployed — so we auto-wipe the persisted store on the next Start to avoid
@@ -666,6 +671,26 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
 
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
+        // CRDT-KV bridge: a peer published one of its crdt_kv snapshots over the
+        // node/Iroh mesh (see _broadcastCrdt). Merge it back into our local
+        // crdt_kv store so holdings/commands/mission converge without BLE, then
+        // surface it. Bridge docs are plumbing, not user-facing feed entries.
+        if (change.collection == _kCrdtBridgeCollection) {
+          try {
+            // Node-published docs are wrapped as {id, fields:{...}}; _docFields
+            // unwraps to the fields we set in _broadcastCrdt.
+            final fields = _docFields(node.getRaw(change.collection, change.docId));
+            final coll = fields?['coll'] as String?;
+            final hex = fields?['hex'] as String?;
+            if (coll != null && hex != null && hex.isNotEmpty) {
+              node.crdtKvMerge(coll, hex);
+              _refreshCounter(node); // holdings (water) total
+              _refreshMission(node); // mission objective
+              if (mounted) setState(() {}); // commands list re-reads in build
+            }
+          } catch (_) {}
+          return;
+        }
         // Internal collections shown elsewhere — skip in the feed.
         if (change.collection == 'nodes' || change.collection == 'mission') return;
         final key = '${change.collection}/${change.docId}';
@@ -1065,6 +1090,37 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       envelopes.add(env);
     }
     _sendCrdtFrames(envelopes);
+    // Also bridge this update over the node-layer mesh (Iroh/Wi-Fi). The frames
+    // above only reach BLE peers; this lets the CRDT-KV collections converge on
+    // transports the node already runs natively — the only path that works on
+    // desktop and the iOS simulator. We publish the collection's FULL snapshot
+    // (not just this delta) as a single LWW doc keyed by source collection, so
+    // a missed publish self-heals on the next one and the receiver always sees
+    // complete state. The receiver merges it back into its crdt_kv store (see
+    // subscribeChanges). Automerge merges are idempotent, so this coexists
+    // harmlessly with the BLE path on devices that have both radios.
+    final node = _node;
+    if (node != null) {
+      try {
+        final snapHex = node.crdtKvSnapshot(collection);
+        // Key the bridge doc per (sender, collection) so two nodes don't clobber
+        // a shared doc id — each publishes its own snapshot and the receiver
+        // merges them independently (mirrors how the `nodes` doc is callsign-
+        // keyed). `coll` carries the real target collection for the merge.
+        node.publishDocument(
+          _kCrdtBridgeCollection,
+          jsonEncode({
+            'id': '$collection@$_callsign',
+            'coll': collection,
+            'hex': snapHex,
+          }),
+        );
+      } catch (_) {
+        // publish_document's Dart binding throws on return-value decode (a
+        // stale-binding bug), but the publish side-effect has already fanned the
+        // doc out over the mesh by then — so the bridge still works. Swallow.
+      }
+    }
   }
 
   // Send the fragment envelopes over the native BLE bridge. Both platforms now
@@ -1231,10 +1287,14 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         node.putCell(cell);
         return null;
       });
-    } else if (Platform.isIOS) {
-      try { node.publishDocument('cells', cellJson); } catch (_) { node.putCell(cell); }
     } else {
-      node.putCell(cell);
+      // Node-layer publish carries `members` and persists locally (readable via
+      // getRaw) + fans out over the mesh. publish_document's Dart binding throws
+      // on return-value decode (a stale-binding bug) AFTER the write completes,
+      // so swallow it. Do NOT fall back to putCell: it writes a flat, memberless
+      // doc that the next refresh reads back, wiping membership — the "added
+      // node reverts" bug.
+      try { node.publishDocument('cells', cellJson); } catch (_) {}
     }
   }
 

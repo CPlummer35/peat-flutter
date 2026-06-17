@@ -3657,8 +3657,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_func_create_node`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_func_create_node != 30790) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_func_create_node`: expected 30790, got $_checksum_uniffi_peat_ffi_checksum_func_create_node');
+    if (_checksum_uniffi_peat_ffi_checksum_func_create_node != 10363) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_func_create_node`: expected 10363, got $_checksum_uniffi_peat_ffi_checksum_func_create_node');
     }
     final int _checksum_uniffi_peat_ffi_checksum_func_create_position;
     try {
@@ -3807,8 +3807,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_method_peatnode_get_document`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_get_document != 47667) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_get_document`: expected 47667, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_get_document');
+    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_get_document != 13489) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_get_document`: expected 13489, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_get_document');
     }
     final int _checksum_uniffi_peat_ffi_checksum_method_peatnode_get_markers;
     try {
@@ -3867,8 +3867,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_method_peatnode_ingest_inbound_lite_frame`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_ingest_inbound_lite_frame != 33280) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_ingest_inbound_lite_frame`: expected 33280, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_ingest_inbound_lite_frame');
+    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_ingest_inbound_lite_frame != 54430) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_ingest_inbound_lite_frame`: expected 54430, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_ingest_inbound_lite_frame');
     }
     final int _checksum_uniffi_peat_ffi_checksum_method_peatnode_publish_document;
     try {
@@ -3877,8 +3877,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_method_peatnode_publish_document`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_publish_document != 25812) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_publish_document`: expected 25812, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_publish_document');
+    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_publish_document != 8309) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_publish_document`: expected 8309, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_publish_document');
     }
     final int _checksum_uniffi_peat_ffi_checksum_method_peatnode_list_documents;
     try {
@@ -3997,8 +3997,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_method_peatnode_request_sync`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_request_sync != 6177) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_request_sync`: expected 6177, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_request_sync');
+    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_request_sync != 31901) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_request_sync`: expected 31901, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_request_sync');
     }
     final int _checksum_uniffi_peat_ffi_checksum_method_peatnode_start_outbound_frames;
     try {
@@ -4017,8 +4017,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_method_peatnode_start_sync`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_start_sync != 55441) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_start_sync`: expected 55441, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_start_sync');
+    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_start_sync != 61436) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_start_sync`: expected 61436, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_start_sync');
     }
     final int _checksum_uniffi_peat_ffi_checksum_method_peatnode_stop_outbound_frames;
     try {
@@ -4047,8 +4047,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_method_peatnode_subscribe`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe != 56100) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_subscribe`: expected 56100, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe');
+    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe != 15054) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_subscribe`: expected 15054, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe');
     }
     final int _checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll;
     try {
@@ -4057,8 +4057,8 @@ class PeatFfiFfi {
     } catch (err) {
       throw StateError('Missing or invalid UniFFI checksum symbol `uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll`: $err');
     }
-    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll != 13410) {
-      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll`: expected 13410, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll');
+    if (_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll != 62723) {
+      throw StateError('UniFFI API checksum mismatch for `uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll`: expected 62723, got $_checksum_uniffi_peat_ffi_checksum_method_peatnode_subscribe_poll');
     }
     final int _checksum_uniffi_peat_ffi_checksum_method_peatnode_sync_document;
     try {
