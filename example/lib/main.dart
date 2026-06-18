@@ -688,7 +688,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
               _refreshMission(node); // mission objective
               if (mounted) setState(() {}); // commands list re-reads in build
             }
-          } catch (_) {}
+          } catch (e) {
+            // A failure here means an inbound snapshot didn't merge, so this
+            // node silently stops converging — log it rather than swallow,
+            // otherwise a broken mesh looks identical to an idle one.
+            debugPrint('[crdt-bridge] merge failed for ${change.docId}: $e');
+          }
           return;
         }
         // Internal collections shown elsewhere — skip in the feed.
