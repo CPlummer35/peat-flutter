@@ -12,7 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PEAT_DIR="${PEAT_WORKSPACE_DIR:-"${SCRIPT_DIR}/../../peat"}"
 FRAMEWORKS_DIR="${SCRIPT_DIR}/Frameworks"
-FEATURES="sync,bluetooth,lite-bridge"
+FEATURES="${PEAT_FEATURES:-sync,bluetooth,lite-bridge}"
 MANIFEST="${PEAT_DIR}/Cargo.toml"
 
 echo "==> Building peat-ffi for aarch64-apple-darwin"

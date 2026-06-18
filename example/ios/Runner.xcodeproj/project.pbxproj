@@ -502,7 +502,7 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEAD_CODE_STRIPPING = NO;
-				DEVELOPMENT_TEAM = ZX6KAXH9Y6;
+				DEVELOPMENT_TEAM = 3ARHJ3FY63;
 				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -527,7 +527,7 @@
 					"-framework",
 					CoreBluetooth,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.defenseunicorns.peatFlutterExample;
+				PRODUCT_BUNDLE_IDENTIFIER = com.caidenplummer.peatFlutterExample;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_INSTALLED_PRODUCT = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -545,7 +545,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.defenseunicorns.peatFlutterExample.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.caidenplummer.peatFlutterExample.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -563,7 +563,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.defenseunicorns.peatFlutterExample.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.caidenplummer.peatFlutterExample.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
@@ -579,7 +579,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.defenseunicorns.peatFlutterExample.RunnerTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.caidenplummer.peatFlutterExample.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runner";
@@ -706,7 +706,7 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEAD_CODE_STRIPPING = NO;
-				DEVELOPMENT_TEAM = ZX6KAXH9Y6;
+				DEVELOPMENT_TEAM = 3ARHJ3FY63;
 				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -731,7 +731,7 @@
 					"-framework",
 					CoreBluetooth,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.defenseunicorns.peatFlutterExample;
+				PRODUCT_BUNDLE_IDENTIFIER = com.caidenplummer.peatFlutterExample;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_INSTALLED_PRODUCT = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -750,7 +750,7 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEAD_CODE_STRIPPING = NO;
-				DEVELOPMENT_TEAM = ZX6KAXH9Y6;
+				DEVELOPMENT_TEAM = 3ARHJ3FY63;
 				ENABLE_BITCODE = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -775,7 +775,7 @@
 					"-framework",
 					CoreBluetooth,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.defenseunicorns.peatFlutterExample;
+				PRODUCT_BUNDLE_IDENTIFIER = com.caidenplummer.peatFlutterExample;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRIP_INSTALLED_PRODUCT = NO;
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
