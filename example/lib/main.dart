@@ -129,6 +129,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // Survives stop/start so reconnect-triggered re-syncs of unchanged docs are silent.
   final Map<String, int> _contentHashes = {};
   List<String> _peers = [];
+  // Auto-reconnect: peers we've meshed with are remembered (node id -> callsign)
+  // and re-dialed without re-scanning a QR. The node id is stable per device and,
+  // with relay/pkarr discovery enabled, is enough to redial by itself. Persisted
+  // across launches so a restart auto-reconnects. Symmetric: every node remembers
+  // every peer it connects to, so either side heals the link.
+  final Map<String, String> _knownPeers = {};
+  static const _kKnownPeersKey = 'known_peers';
+  final Map<String, int> _lastRedialMs = {}; // per-peer redial throttle
+  int _lastRedialSweepMs = 0;                 // global redial throttle
   SyncStats? _syncStats;
   String? _endpointAddr;
   String? _endpointSocketAddr;
@@ -201,11 +210,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // saw it advance, keyed by node id. See the roster builder for rationale.
   final Map<String, int> _nodeHbSeen = {};
   final Map<String, int> _nodeSeenLocal = {};
-  // Liveness window: a peer counts as "online" only while its heartbeat advanced
-  // within this window. Kept short so a dropped/suspended node greys out
-  // promptly — iroh's connectedPeers set lags ~30s behind (QUIC idle-timeout),
-  // so the heartbeat going quiet is the faster, authoritative drop signal.
-  static const int _kLivenessWindowMs = 15000;
+  // Heartbeat liveness window for RELAY-ONLY peers (those not in connectedPeers).
+  // Must comfortably exceed the real presence-sync gap, which over the relay
+  // bursts to ~16s — a tighter window false-trips "offline" on a healthy link
+  // (observed: DROP with inPeers=true, hbAge=16s). Directly-connected peers use
+  // connectedPeers instead (see _isOnline), so this only governs the fallback.
+  static const int _kLivenessWindowMs = 45000;
   // Last-known online state per node id, so an online->offline transition can
   // fire the "node lost connection" popup exactly once per drop.
   final Map<String, bool> _wasOnline = {};
@@ -315,6 +325,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       }
     });
     _initConnectivity();
+    _loadKnownPeers();
   }
 
   // Track whether this device is on cellular (mobile data), and re-advertise on
@@ -462,6 +473,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       // heartbeat). The peer's state comes back via its heartbeat re-advertise.
       _publishSelf(node);
       _flushMyCounter(node);
+
+      // Auto-reconnect: redial every remembered peer so a relaunch re-forms the
+      // mesh without re-scanning a QR. Delayed a bit so our endpoint is
+      // discoverable (pkarr publish) and the node has settled first.
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _node != null) _redialKnownPeers(force: true);
+      });
 
       var _heartbeatTick = 0;
       var _catchupRotor = 0; // round-robins catch-up broadcasts, one per beat
@@ -718,6 +736,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         });
         // After the roster updates, surface any node that just went offline.
         _detectNodeDrops();
+        // Remember current peers (symmetric) and re-dial any remembered peer
+        // that's gone offline — heals the mesh after a drop without re-scanning.
+        _rememberConnectedPeers();
+        _redialKnownPeers();
       });
 
       // Refresh relative timestamps every 10 s
@@ -1056,6 +1078,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     // requestSync (started with the node) pulls theirs.
     _publishSelf(node);
     _flushMyCounter(node);
+    _rememberPeer(id, ''); // remember for auto-reconnect (name fills in later)
     _peerTokenCtrl.clear();
     if (announce && mounted) {
       final via = addr ?? (useRelay ? 'relay' : null);
@@ -1120,6 +1143,82 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
             : 'Still connecting to $short… give it a moment.'),
         behavior: SnackBarBehavior.floating,
       ));
+    }
+  }
+
+  // ── Auto-reconnect (known peers) ─────────────────────────────────────────
+
+  // Load remembered peers from prefs into _knownPeers (called once at startup).
+  Future<void> _loadKnownPeers() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kKnownPeersKey);
+      if (raw == null) return;
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          _knownPeers
+            ..clear()
+            ..addAll(m.map((k, v) => MapEntry(k, v.toString())));
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _persistKnownPeers() {
+    SharedPreferences.getInstance()
+        .then((p) => p.setString(_kKnownPeersKey, jsonEncode(_knownPeers)))
+        .catchError((_) => false);
+  }
+
+  // Remember a peer for auto-reconnect. Persists only on a real change. A blank
+  // name is kept as a placeholder until the callsign resolves from the roster.
+  void _rememberPeer(String id, String name) {
+    if (id.isEmpty || id == _nodeId || id.length < 16) return;
+    final clean =
+        (name.isNotEmpty && name != id) ? name : (_knownPeers[id] ?? '');
+    if (_knownPeers.containsKey(id) && _knownPeers[id] == clean) return;
+    setState(() => _knownPeers[id] = clean);
+    _persistKnownPeers();
+  }
+
+  void _forgetPeer(String id) {
+    if (_knownPeers.remove(id) != null) {
+      setState(() {});
+      _persistKnownPeers();
+    }
+  }
+
+  // Refresh remembered peers from the current connected set + roster names.
+  void _rememberConnectedPeers() {
+    for (final id in _peers) {
+      _rememberPeer(id, _nodeNames[id] ?? '');
+    }
+    for (final n in _roster) {
+      if (_knownPeers.containsKey(n.id)) _rememberPeer(n.id, n.name);
+    }
+  }
+
+  // Re-dial remembered peers that aren't currently reachable. connectPeer is a
+  // BLOCKING FFI call (awaits connect + handshake), so periodic sweeps redial at
+  // most one peer and are globally throttled to avoid UI jank; [force] (used on
+  // node start) redials every offline known peer at once.
+  void _redialKnownPeers({bool force = false}) {
+    final node = _node;
+    if (node == null || _knownPeers.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force && now - _lastRedialSweepMs < 10000) return; // global throttle
+    for (final id in _knownPeers.keys.toList()) {
+      if (id == _nodeId || _peers.contains(id)) continue;
+      final seen = _nodeSeenLocal[id];
+      if (seen != null && now - seen <= _kLivenessWindowMs) continue; // online
+      if (!force && now - (_lastRedialMs[id] ?? 0) < 20000) continue; // per-peer
+      _lastRedialMs[id] = now;
+      _lastRedialSweepMs = now;
+      try {
+        node.connectPeer(nodeId: id); // relay/pkarr discovery resolves the rest
+      } catch (_) {}
+      if (!force) break; // one redial per sweep bounds the blocking
     }
   }
 
@@ -1593,19 +1692,18 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     return null;
   }
 
-  // Is this roster node currently reachable? Heartbeat-authoritative: once we've
-  // seen a peer's heartbeat tick, liveness is the freshness of that heartbeat —
-  // a dropped/suspended peer greys out within _kLivenessWindowMs even if it
-  // lingers in connectedPeers (which clears far slower via QUIC idle-timeout).
-  // Before the first heartbeat tick we trust the live connection (just-connected
-  // grace). A node seen only via the persisted CRDT presence doc reads offline.
+  // Is this roster node currently reachable? connectedPeers (the live QUIC link)
+  // is authoritative — while a peer is in it, it's online regardless of presence-
+  // sync gaps (those bursts to ~16s and would otherwise flicker the dot). For a
+  // RELAY-ONLY peer that isn't in connectedPeers, fall back to heartbeat
+  // freshness within the (wide) window. A node seen only via the persisted CRDT
+  // presence doc, with no recent heartbeat, reads offline.
   bool _isOnline(NodeInfo n) {
     if (n.id == _nodeId) return true;
+    if (_peers.contains(n.id)) return true; // live link — authoritative
     final seen = _nodeSeenLocal[n.id];
-    if (seen != null) {
-      return DateTime.now().millisecondsSinceEpoch - seen <= _kLivenessWindowMs;
-    }
-    return _peers.contains(n.id); // connected, heartbeat not yet observed
+    return seen != null &&
+        DateTime.now().millisecondsSinceEpoch - seen <= _kLivenessWindowMs;
   }
 
   // Compare each roster node's online state to last cycle; on an online->offline
@@ -3295,6 +3393,55 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
                         icon: const Icon(Icons.qr_code_scanner, size: 18),
                         label: const Text("Scan leader's QR"),
                       ),
+                    ),
+                  ],
+                  // Remembered peers — auto-redialed on launch and after drops,
+                  // so reconnecting never needs another QR scan.
+                  if (_knownPeers.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Expanded(
+                        child: Text('Saved peers (${_knownPeers.length})',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w600)),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _redialKnownPeers(force: true),
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Reconnect'),
+                      ),
+                    ]),
+                    ..._knownPeers.entries.map((e) {
+                      final id = e.key;
+                      final label = e.value.isNotEmpty
+                          ? e.value
+                          : '${id.substring(0, 8)}…';
+                      final online = _peers.contains(id) ||
+                          (_nodeSeenLocal[id] != null &&
+                              DateTime.now().millisecondsSinceEpoch -
+                                      _nodeSeenLocal[id]! <=
+                                  _kLivenessWindowMs);
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(children: [
+                          _presenceDot(online),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Text(label,
+                                  style: theme.textTheme.bodySmall)),
+                          InkWell(
+                            onTap: () => _forgetPeer(id),
+                            child: Icon(Icons.close,
+                                size: 16, color: theme.colorScheme.outline),
+                          ),
+                        ]),
+                      );
+                    }),
+                    Text(
+                      'Auto-reconnects on launch and after drops — no re-scan.',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                          fontStyle: FontStyle.italic),
                     ),
                   ],
                 ],
