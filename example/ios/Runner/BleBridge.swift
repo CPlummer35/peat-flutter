@@ -50,19 +50,6 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     private var notifyQueue: [Data] = []
     private static let maxNotifyQueue = 256
 
-    // Background local-notification throttle. When the app is backgrounded the
-    // Dart isolate is suspended, so the Dart change-notification path can't run;
-    // we fire a coarse "mesh update" from here instead, rate-limited so a burst
-    // of inbound BLE frames doesn't spam the user.
-    private var lastBgNotify = Date.distantPast
-    private static let bgNotifyMinInterval: TimeInterval = 10
-    // Bounded set of recently-seen inbound frame hashes. The mesh re-broadcasts
-    // unchanged snapshots on a timer (catch-up gossip), so most inbound frames
-    // are repeats; only a NOVEL payload should be able to raise an alert.
-    private var recentFrameHashes: Set<Int> = []
-    private var recentFrameOrder: [Int] = []
-    private static let maxRecentFrames = 512
-
     var localDeviceName = "PEAT_peatwtr-00000000"
 
     var onDataReceived: ((String, Data) -> Void)?
@@ -120,7 +107,6 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         for (_, p) in connected { central.cancelPeripheralConnection(p) }
         connected.removeAll(); discovered.removeAll(); subscribedCentrals.removeAll()
         notifyQueue.removeAll()
-        recentFrameHashes.removeAll(); recentFrameOrder.removeAll()
         if peripheral?.isAdvertising == true { peripheral.stopAdvertising() }
         peripheral?.removeAllServices()
         serviceAdded = false
@@ -182,49 +168,9 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         if error == nil { startAdvertising() } else { blog("didAdd service error: \(error!)") }
     }
 
-    // Fire a local notification for inbound mesh data received while the app is
-    // backgrounded. The Dart layer normally renders change notifications, but it
-    // is suspended in the background, so the alert must originate here. Coarse by
-    // necessity: this layer holds opaque relay frames and can't decode the
-    // collection or distinguish a remote change from an echo, so it's a single
-    // throttled "mesh update" rather than a per-change alert. Relies on the
-    // notification authorization the Dart side already requests at startup
-    // (iOS authorization is app-wide). CB callbacks run on the main queue
-    // (managers created with queue: nil), so touching UIApplication is safe.
-    private func notifyBackgroundDataIfNeeded(_ data: Data) {
-        guard UIApplication.shared.applicationState != .active else { return }
-        // Suppress re-broadcast (gossip) frames: alert only on a payload we
-        // haven't seen recently. Without this, the mesh's periodic snapshot
-        // re-sends raise a fresh notification every throttle window for a single
-        // change. Dedup by content hash against a bounded recent set.
-        let h = data.hashValue
-        if recentFrameHashes.contains(h) { return }
-        recentFrameHashes.insert(h)
-        recentFrameOrder.append(h)
-        if recentFrameOrder.count > PeatBLEManager.maxRecentFrames {
-            recentFrameHashes.remove(recentFrameOrder.removeFirst())
-        }
-        // A real change still arrives as several distinct new fragments; the
-        // rate limit collapses that burst into a single alert.
-        let now = Date()
-        guard now.timeIntervalSince(lastBgNotify) >= PeatBLEManager.bgNotifyMinInterval
-        else { return }
-        lastBgNotify = now
-        let content = UNMutableNotificationContent()
-        content.title = "Mesh update"
-        content.body = "New data synced from a nearby node."
-        content.sound = .default
-        let req = UNNotificationRequest(
-            identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(req)
-    }
-
     func peripheralManager(_ pm: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         for req in requests {
-            if let data = req.value {
-                onDataReceived?("central:" + req.central.identifier.uuidString, data)
-                notifyBackgroundDataIfNeeded(data)
-            }
+            if let data = req.value { onDataReceived?("central:" + req.central.identifier.uuidString, data) }
             pm.respond(to: req, withResult: .success)
         }
     }
@@ -317,7 +263,6 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     func peripheral(_ p: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let data = characteristic.value else { return }
         onDataReceived?(p.identifier.uuidString, data)
-        notifyBackgroundDataIfNeeded(data)
     }
 
     // ----- Outbound: send to every connected peer (both roles) -----
@@ -369,7 +314,66 @@ final class PeatBleBridge: NSObject, FlutterStreamHandler {
     private var rxSink: FlutterEventSink?
     private var started = false
 
+    // Background local-notification state. When the app is backgrounded the Dart
+    // isolate is suspended, so the Dart change-notification path can't run; we
+    // fire from here on the unwrapped relay envelope instead. Dedup on the
+    // content-addressed msgId (re-broadcasts of unchanged snapshots, and the
+    // multiple fragments of one message, share a msgId) so a single change
+    // yields a single alert.
+    private var lastBgNotify = Date.distantPast
+    private static let bgNotifyMinInterval: TimeInterval = 5
+    private var recentMsgIds: Set<UInt32> = []
+    private var recentMsgOrder: [UInt32] = []
+    private static let maxRecentMsgIds = 256
+
     private func nowMs() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
+
+    // Friendly collection label for the notification body.
+    private func friendlyCollection(_ coll: String) -> String {
+        switch coll {
+        case "holdings": return "water"
+        default: return coll
+        }
+    }
+
+    // Parse an unwrapped 0xAF CRDT envelope and, if the app is backgrounded, post
+    // a local notification for a genuinely-new change. Layout (see Dart
+    // _broadcastCrdt): [0]=0xAF [1]=transport [2]=collLen [3..]=collection
+    // [+0..3]=msgId(BE, content-addressed FNV-1a) [+4]=fragIdx [+5]=fragCount.
+    //
+    // Dedup on msgId so the mesh's periodic re-broadcasts of unchanged snapshots
+    // (same content -> same msgId) and the fragments of one message (shared
+    // msgId) collapse to nothing/one. Skip 'nodes' — presence heartbeats churn
+    // every few seconds with fresh timestamps, matching the Dart-side filter.
+    private func maybeNotifyBackgroundChange(_ env: Data) {
+        guard UIApplication.shared.applicationState != .active else { return }
+        let b = [UInt8](env)
+        guard b.count >= 3, b[0] == 0xAF, b[1] == 2 else { return } // 2 == CRDT transport
+        let collLen = Int(b[2])
+        let hdr = 3 + collLen
+        guard b.count >= hdr + 6,
+              let coll = String(bytes: b[3..<hdr], encoding: .utf8) else { return }
+        if coll == "nodes" { return }
+        let msgId = (UInt32(b[hdr]) << 24) | (UInt32(b[hdr + 1]) << 16)
+                  | (UInt32(b[hdr + 2]) << 8) | UInt32(b[hdr + 3])
+        if recentMsgIds.contains(msgId) { return } // re-broadcast or sibling fragment
+        recentMsgIds.insert(msgId)
+        recentMsgOrder.append(msgId)
+        if recentMsgOrder.count > PeatBleBridge.maxRecentMsgIds {
+            recentMsgIds.remove(recentMsgOrder.removeFirst())
+        }
+        let now = Date()
+        guard now.timeIntervalSince(lastBgNotify) >= PeatBleBridge.bgNotifyMinInterval
+        else { return }
+        lastBgNotify = now
+        let content = UNMutableNotificationContent()
+        content.title = "Mesh update"
+        content.body = "New \(friendlyCollection(coll)) update from a nearby node."
+        content.sound = .default
+        let req = UNNotificationRequest(
+            identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
 
     static func register(messenger: FlutterBinaryMessenger) {
         let bridge = PeatBleBridge()
@@ -435,6 +439,9 @@ final class PeatBleBridge: NSObject, FlutterStreamHandler {
             // onBleData/onBleDataReceived fall through to merge_document and drop it.
             let res = mesh.onBleDataReceivedAnonymous(identifier: id, data: data, nowMs: self.nowMs())
             if let relay = res?.relayData, !relay.isEmpty {
+                // Background alert (Dart is suspended): fire here on the
+                // unwrapped envelope, deduped by content-addressed msgId.
+                self.maybeNotifyBackgroundChange(relay)
                 DispatchQueue.main.async {
                     self.rxSink?(FlutterStandardTypedData(bytes: relay))
                 }
@@ -448,6 +455,7 @@ final class PeatBleBridge: NSObject, FlutterStreamHandler {
 
     private func stopBle() {
         radio.stop()
+        recentMsgIds.removeAll(); recentMsgOrder.removeAll()
         mesh = nil
         started = false
         blog("BLE stopped")
