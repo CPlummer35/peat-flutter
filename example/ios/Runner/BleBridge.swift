@@ -21,6 +21,8 @@
 import Foundation
 import CoreBluetooth
 import Flutter
+import UIKit
+import UserNotifications
 
 private let PEAT_SERVICE_UUID_16 = CBUUID(string: "F47A")
 private let PEAT_SERVICE_UUID_128 = CBUUID(string: "F47AC10B-58CC-4372-A567-0E02B2C3D479")
@@ -47,6 +49,13 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     // 4s snapshot gossip re-sends the whole doc, so a dropped fragment recovers.
     private var notifyQueue: [Data] = []
     private static let maxNotifyQueue = 256
+
+    // Background local-notification throttle. When the app is backgrounded the
+    // Dart isolate is suspended, so the Dart change-notification path can't run;
+    // we fire a coarse "mesh update" from here instead, rate-limited so a burst
+    // of inbound BLE frames doesn't spam the user.
+    private var lastBgNotify = Date.distantPast
+    private static let bgNotifyMinInterval: TimeInterval = 10
 
     var localDeviceName = "PEAT_peatwtr-00000000"
 
@@ -166,9 +175,36 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         if error == nil { startAdvertising() } else { blog("didAdd service error: \(error!)") }
     }
 
+    // Fire a local notification for inbound mesh data received while the app is
+    // backgrounded. The Dart layer normally renders change notifications, but it
+    // is suspended in the background, so the alert must originate here. Coarse by
+    // necessity: this layer holds opaque relay frames and can't decode the
+    // collection or distinguish a remote change from an echo, so it's a single
+    // throttled "mesh update" rather than a per-change alert. Relies on the
+    // notification authorization the Dart side already requests at startup
+    // (iOS authorization is app-wide). CB callbacks run on the main queue
+    // (managers created with queue: nil), so touching UIApplication is safe.
+    private func notifyBackgroundDataIfNeeded() {
+        guard UIApplication.shared.applicationState != .active else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastBgNotify) >= PeatBLEManager.bgNotifyMinInterval
+        else { return }
+        lastBgNotify = now
+        let content = UNMutableNotificationContent()
+        content.title = "Mesh update"
+        content.body = "New data synced from a nearby node."
+        content.sound = .default
+        let req = UNNotificationRequest(
+            identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+
     func peripheralManager(_ pm: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         for req in requests {
-            if let data = req.value { onDataReceived?("central:" + req.central.identifier.uuidString, data) }
+            if let data = req.value {
+                onDataReceived?("central:" + req.central.identifier.uuidString, data)
+                notifyBackgroundDataIfNeeded()
+            }
             pm.respond(to: req, withResult: .success)
         }
     }
@@ -261,6 +297,7 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     func peripheral(_ p: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let data = characteristic.value else { return }
         onDataReceived?(p.identifier.uuidString, data)
+        notifyBackgroundDataIfNeeded()
     }
 
     // ----- Outbound: send to every connected peer (both roles) -----

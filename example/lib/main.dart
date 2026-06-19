@@ -796,6 +796,25 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
               _refreshCounter(node); // holdings (water) total
               _refreshMission(node); // mission objective
               if (mounted) setState(() {}); // commands list re-reads in build
+              // These user-facing collections (water/commands/mission) sync as
+              // wrapped crdtbridge docs and so never reach the notification
+              // path below. Notify here on a REMOTE change that actually altered
+              // the merged content. Skip 'nodes' (presence heartbeats churn
+              // constantly) and suppress the first sighting per collection (a
+              // baseline seed) so a cold-start sync doesn't flurry notifications.
+              if (change.origin.isRemote && coll != 'nodes') {
+                final sigKey = 'crdt:$coll';
+                final sig = node.crdtKvSnapshot(coll).hashCode;
+                final hadBaseline = _contentHashes.containsKey(sigKey);
+                if (hadBaseline && _contentHashes[sigKey] != sig) {
+                  PeatNotifications.instance.showRemoteChange(
+                    collection: _friendlyCollectionName(coll),
+                    preview: _crdtNotifPreview(coll),
+                    peerId: change.origin.peerId,
+                  );
+                }
+                _contentHashes[sigKey] = sig;
+              }
             }
           } catch (e) {
             // A failure here means an inbound snapshot didn't merge, so this
@@ -1448,6 +1467,26 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       }
     } catch (_) {}
     return (mine: mine, total: total);
+  }
+
+  // Human-readable name for a crdt-bridge collection, used in notifications.
+  String _friendlyCollectionName(String coll) {
+    switch (coll) {
+      case _holdingsCollection:
+        return 'water';
+      case 'commands':
+        return 'commands';
+      case _missionCollection:
+        return 'mission';
+      default:
+        return coll;
+    }
+  }
+
+  // Short notification preview for a crdt-bridge collection (best-effort).
+  String? _crdtNotifPreview(String coll) {
+    if (coll == _holdingsCollection) return 'total: $_crdtTotal L';
+    return null;
   }
 
   void _refreshCounter(PeatFlutterNode node) {
