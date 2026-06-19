@@ -18,6 +18,8 @@ import 'package:peat_flutter/peat_flutter.dart';
 import 'package:peat_flutter/src/generated/peat_ffi.dart' show SyncStats, TransportConfigFFI;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'notifications.dart';
+
 /// A single document change event for the activity feed.
 class _ChangeEntry {
   final String changeType; // 'upsert' | 'delete'
@@ -283,6 +285,9 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Set up local notifications (asks permission on first run). Used to alert
+    // the user about changes other nodes made — see the subscribeChanges handler.
+    PeatNotifications.instance.init();
     // Default capabilities by platform role; macOS = command post.
     if (Platform.isMacOS) {
       _myCapabilities = ['leader', 'comms', 'logistics'];
@@ -848,6 +853,19 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
           ));
           if (_changeLog.length > 50) _changeLog.removeLast();
         });
+        // Notify the user only about changes ANOTHER node made — origin tells
+        // us this wasn't our own local edit (which would be noise). Reuses the
+        // collection + content-changed filtering above, so re-syncs of
+        // unchanged docs and self-edits never buzz. (Production would also gate
+        // on app-backgrounded; for the POC we surface remote changes always so
+        // the path is demonstrable without backgrounding.)
+        if (change.origin.isRemote) {
+          PeatNotifications.instance.showRemoteChange(
+            collection: change.collection,
+            preview: preview,
+            peerId: change.origin.peerId,
+          );
+        }
       });
 
       setState(() {
