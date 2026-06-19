@@ -136,7 +136,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // every peer it connects to, so either side heals the link.
   final Map<String, String> _knownPeers = {};
   static const _kKnownPeersKey = 'known_peers';
-  final Map<String, int> _lastRedialMs = {}; // per-peer redial throttle
+  // The formation group these peers belong to. This example runs a single
+  // group keyed by its app id; the native roster is scoped by this so the
+  // reconnect supervisor knows which members to re-dial.
+  static const _kGroupId = 'peat-flutter-example';
   SyncStats? _syncStats;
   String? _endpointAddr;
   String? _endpointSocketAddr;
@@ -343,6 +346,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         // Push the new uplink state to peers right away.
         if (_node != null) _publishSelf(_node!);
       }
+      // Any connectivity change can restore reachability or invalidate a path
+      // (IP reassignment on cellular, roaming between Wi-Fi networks). Wake the
+      // native reconnect supervisor so it re-evaluates and re-dials known peers.
+      _node?.wakeReconnect();
     }
 
     try {
@@ -698,6 +705,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
             } else if (hb > prevHb) {
               _nodeHbSeen[n.id] = hb;
               _nodeSeenLocal[n.id] = localNow;
+              // Fresh presence from a peer we're not directly connected to (it
+              // reached us via relay or BLE multi-hop). Nudge the supervisor to
+              // open a direct path — a no-op if it's already connected/dialing.
+              if (n.id != _nodeId && !_peers.contains(n.id)) {
+                _node?.onPeerObserved(n.id);
+              }
             }
           }
           final liveCutoff = localNow - _kLivenessWindowMs;
@@ -843,6 +856,12 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         _changeSub = sub;
         _starting = false;
       });
+
+      // Seed the native reconnect supervisor with every peer we already know
+      // (loaded from prefs). From here the supervisor keeps a live path up to
+      // each member on its own — the app no longer drives the redial loop.
+      _syncRosterToNative();
+      node.wakeReconnect();
     } catch (e, st) {
       debugPrint('[startfail] $e\n$st');
       // Rust's create_node already retries redb open for up to 30s internally.
@@ -1180,6 +1199,20 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     if (_knownPeers.containsKey(id) && _knownPeers[id] == clean) return;
     setState(() => _knownPeers[id] = clean);
     _persistKnownPeers();
+    // Mirror into the native roster so the reconnect supervisor can re-dial
+    // this member across restarts and transport changes.
+    _node?.rememberPeer(groupId: _kGroupId, nodeId: id, name: clean);
+  }
+
+  // Push all currently-remembered peers into the native roster. Called once at
+  // node start to seed the supervisor from peers persisted across launches.
+  void _syncRosterToNative() {
+    final node = _node;
+    if (node == null) return;
+    _knownPeers.forEach((id, name) {
+      if (id == _nodeId || id.length < 16) return;
+      node.rememberPeer(groupId: _kGroupId, nodeId: id, name: name);
+    });
   }
 
   void _forgetPeer(String id) {
@@ -1199,26 +1232,22 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     }
   }
 
-  // Re-dial remembered peers that aren't currently reachable. connectPeer is a
-  // BLOCKING FFI call (awaits connect + handshake), so periodic sweeps redial at
-  // most one peer and are globally throttled to avoid UI jank; [force] (used on
-  // node start) redials every offline known peer at once.
+  // Nudge the native reconnect supervisor. Reconnection itself is now owned by
+  // the native layer: it walks the roster and keeps a live path up to each
+  // member over whatever transport is reachable, with backoff and
+  // cross-transport dedup — replacing the app-side per-peer throttle/liveness
+  // loop this method used to run. [force] (used on node start) clears backoff
+  // for an immediate full retry; otherwise it's a gentle pass.
   void _redialKnownPeers({bool force = false}) {
     final node = _node;
-    if (node == null || _knownPeers.isEmpty) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    for (final id in _knownPeers.keys.toList()) {
-      if (id == _nodeId || _peers.contains(id)) continue;
-      final seen = _nodeSeenLocal[id];
-      if (seen != null && now - seen <= _kLivenessWindowMs) continue; // online
-      if (!force && now - (_lastRedialMs[id] ?? 0) < 15000) continue; // per-peer throttle
-      _lastRedialMs[id] = now;
-      try {
-        // Non-blocking: the dial runs on the native runtime, so we can fire for
-        // every offline known peer each sweep without freezing the UI isolate.
-        node.connectPeerNowait(nodeId: id); // relay/pkarr discovery resolves the rest
-      } catch (_) {}
-    }
+    if (node == null) return;
+    try {
+      if (force) {
+        node.wakeReconnect();
+      } else {
+        node.reconnectKnownPeers();
+      }
+    } catch (_) {}
   }
 
   Future<void> _resetDatabase() async {
@@ -2666,12 +2695,18 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     // already on. So without this, an iPhone that locked goes deaf/silent and
     // never rejoins the mesh. Kick the radio back on and re-publish our
     // heartbeat + counter so peers immediately see us as live again.
-    if (state == AppLifecycleState.resumed && _node != null && _bleRunning) {
-      if (Platform.isIOS) {
-        _bleChannel.invokeMethod('bleResume').catchError((_) => null);
+    if (state == AppLifecycleState.resumed && _node != null) {
+      if (_bleRunning) {
+        if (Platform.isIOS) {
+          _bleChannel.invokeMethod('bleResume').catchError((_) => null);
+        }
+        _publishSelf(_node!);
+        _flushMyCounter(_node!);
       }
-      _publishSelf(_node!);
-      _flushMyCounter(_node!);
+      // Foreground: hand the transition to the native reconnect supervisor.
+      // Clear backoff and dial every known peer now — network paths may have
+      // changed (or connections dropped) while we were backgrounded.
+      _node!.wakeReconnect();
     }
   }
 
