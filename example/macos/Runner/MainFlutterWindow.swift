@@ -10,6 +10,9 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    // macOS BLE bridge (CoreBluetooth <-> peat-btle), mirroring iOS.
+    PeatBleBridge.register(messenger: flutterViewController.engine.binaryMessenger)
+
     super.awakeFromNib()
   }
 }

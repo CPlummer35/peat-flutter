@@ -1,0 +1,7 @@
+module peat_btleFFI {
+    header "peat_btleFFI.h"
+    export *
+    use "Darwin"
+    use "_Builtin_stdbool"
+    use "_Builtin_stdint"
+}

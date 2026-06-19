@@ -607,7 +607,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
           _endpointSocketAddr = _node!.endpointSocketAddr;
           // BLE peers aren't in the iroh connected-set; poll the native bridge.
           // Both Android and iOS expose blePeerCount over the same channel.
-          if ((Platform.isAndroid || Platform.isIOS) && _bleRunning) {
+          if ((Platform.isAndroid || Platform.isIOS || Platform.isMacOS) && _bleRunning) {
             _bleChannel.invokeMethod<int>('blePeerCount').then((c) {
               if (mounted && c != null && c != _blePeerCount) {
                 final rising = _blePeerCount == 0 && c > 0;
@@ -1304,10 +1304,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         node.publishSelf(nodeId: id, name: _callsign, capabilities: _myCapabilities);
         return null;
       });
-    } else if (Platform.isIOS) {
-      // iOS: publish via the Dart node layer directly (no JNI channel). This is
-      // what reaches startOutboundFrames -> BLE; publishRaw/publishSelf write
-      // to storage_backend and emit nothing.
+    } else if (Platform.isIOS || Platform.isMacOS) {
+      // iOS/macOS: publish via the Dart node layer directly (no JNI channel).
+      // This is what reaches startOutboundFrames -> BLE; publishRaw/publishSelf
+      // write to storage_backend and emit nothing.
       try {
         node.publishDocument('nodes', json);
       } catch (_) {
@@ -2466,7 +2466,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     //   inbound : EventChannel relay payload (the same envelope, 0xAF-marked)
     //             -> unwrap -> ingestInboundFrame / ingestInboundLiteFrame.
     // The envelope is byte-identical to the Android BleBridge.kt wire format.
-    if (Platform.isIOS) {
+    if (Platform.isIOS || Platform.isMacOS) {
       // peat-btle node id: a stable 32-bit derived from the peat-ffi node id.
       final int bleNodeId = int.parse(node.nodeId.substring(0, 8), radix: 16);
       _bleChannel.invokeMethod('startBle', {
@@ -2599,7 +2599,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     }
     // iOS: stop the native radio + the inbound ingest BEFORE disposing the
     // node, so a late relay frame can't call ingest* on a freed node.
-    if (Platform.isIOS) {
+    if (Platform.isIOS || Platform.isMacOS) {
       _bleRxSub?.cancel();
       _bleRxSub = null;
       _bleChannel.invokeMethod('stopBle').catchError((_) => null);
@@ -3234,7 +3234,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
                   if (Platform.isAndroid)
                     _aboutRow(theme, 'Peers (Wi-Fi)', '$_wifiTunnelPeers connected'),
                 ],
-                if ((Platform.isAndroid || Platform.isIOS) && _bleRunning)
+                if ((Platform.isAndroid || Platform.isIOS || Platform.isMacOS) && _bleRunning)
                   _aboutRow(theme, 'Peers (BLE)', '$_blePeerCount connected'),
                 if (Platform.isAndroid) ...[
                   _aboutRow(theme, 'Wi-Fi Direct', _wifiDirectStatus),
