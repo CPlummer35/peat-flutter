@@ -19,6 +19,7 @@ export 'generated/peat_ffi.dart'
         DocumentChange,
         OutboundFrame,
         ChangeType,
+        ChangeOrigin,
         PeerInfo,
         PeerTransportState,
         NodeInfo,

@@ -78,6 +78,27 @@ void main(List<String> args) {
     // Let the spawned dials run a beat so any panic in the async path surfaces.
     sleep(const Duration(seconds: 2));
 
+    // Validate the DocumentChange decode now that it carries `origin`: the Rust
+    // Record serializes a 4th field and the Dart decoder throws on leftover
+    // bytes, so a successful decode proves the layouts agree. A local write must
+    // surface as a change whose origin is Local.
+    final sub = node.subscribePoll();
+    node.putDocument('smoke', 'doc-1', '{"v":1}');
+    sleep(const Duration(milliseconds: 500));
+    final changes = sub.pollChanges();
+    print('OK   pollChanges decoded ${changes.length} change(s)');
+    for (final c in changes) {
+      print('     ${c.collection}:${c.docId} ${c.changeType} origin=${c.origin}');
+    }
+    if (changes.isEmpty) {
+      throw StateError('expected at least one change from the local write');
+    }
+    if (!changes.any((c) => c.collection == 'smoke' && c.origin.isLocal)) {
+      throw StateError('expected a Local-origin change for the smoke write');
+    }
+    print('OK   DocumentChange.origin decoded (Local)');
+    sub.cancel();
+
     print('SMOKE OK');
   } catch (e, st) {
     stderr.writeln('SMOKE FAILED: $e\n$st');

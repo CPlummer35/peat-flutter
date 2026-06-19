@@ -334,6 +334,8 @@ class DocumentChange {
     required this.docId,
     /// Type of change
     required this.changeType,
+    /// Where the change came from (local edit vs. remote peer sync)
+    required this.origin,
   });
 
   /// Collection name
@@ -342,20 +344,29 @@ class DocumentChange {
   final String docId;
   /// Type of change
   final ChangeType changeType;
+  /// Where the change came from — local edit vs. remote peer sync. Consumers
+  /// use this to notify on remote changes without alerting on their own edits.
+  final ChangeOrigin origin;
 
   Map<String, dynamic> toJson() {
     return {
       'collection': this.collection,
       'docId': this.docId,
       'changeType': ChangeTypeFfiCodec.encode(this.changeType),
+      // null = local change; non-null = remote peer's id.
+      'origin': this.origin.peerId,
     };
   }
 
   factory DocumentChange.fromJson(Map<String, dynamic> json) {
+    final originPeer = json['origin'] as String?;
     return DocumentChange(
       collection: json['collection'] as String,
       docId: json['docId'] as String,
       changeType: ChangeTypeFfiCodec.decode(json['changeType'] as String),
+      origin: originPeer == null
+          ? const ChangeOrigin.local()
+          : ChangeOrigin.remote(originPeer),
     );
   }
 
@@ -363,26 +374,60 @@ class DocumentChange {
     String? collection,
     String? docId,
     ChangeType? changeType,
+    ChangeOrigin? origin,
   }) {
     return DocumentChange(
       collection: collection ?? this.collection,
       docId: docId ?? this.docId,
       changeType: changeType ?? this.changeType,
+      origin: origin ?? this.origin,
     );
   }
 
   @override
   String toString() {
-    return 'DocumentChange(collection: $collection, docId: $docId, changeType: $changeType)';
+    return 'DocumentChange(collection: $collection, docId: $docId, changeType: $changeType, origin: $origin)';
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is DocumentChange && collection == other.collection && docId == other.docId && changeType == other.changeType;
+      other is DocumentChange && collection == other.collection && docId == other.docId && changeType == other.changeType && origin == other.origin;
 
   @override
-  int get hashCode => Object.hash(collection, docId, changeType);
+  int get hashCode => Object.hash(collection, docId, changeType, origin);
+}
+
+/// Where a document change came from — a local write vs. a remote peer's sync.
+/// Mirrors peat-ffi's `ChangeOrigin`. Consumers use this to decide whether a
+/// change is worth surfacing to the user: an [isRemote] change is something
+/// another node did (and may warrant a notification); a local one is the user's
+/// own edit and usually is not.
+class ChangeOrigin {
+  /// A change from a local write on this node.
+  const ChangeOrigin.local() : peerId = null;
+
+  /// A change received from a remote peer via sync. [peerId] is that peer's
+  /// stable id (hex node id for the iroh transport; transport-agnostic).
+  const ChangeOrigin.remote(String this.peerId);
+
+  /// The remote peer's id, or null for a local change.
+  final String? peerId;
+
+  bool get isLocal => peerId == null;
+  bool get isRemote => peerId != null;
+
+  @override
+  String toString() =>
+      isRemote ? 'ChangeOrigin.remote($peerId)' : 'ChangeOrigin.local()';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ChangeOrigin && peerId == other.peerId);
+
+  @override
+  int get hashCode => peerId.hashCode;
 }
 
 /// Operator-placed map marker — the typed shape every peer renders
@@ -2481,7 +2526,22 @@ DocumentChange _uniffiReadDocumentChange(_UniFfiBinaryReader reader) {
     collection: reader.readString(),
     docId: reader.readString(),
     changeType: _uniffiReadChangeType(reader),
+    origin: _uniffiReadChangeOrigin(reader),
   );
+}
+
+/// Decode a ChangeOrigin: i32 variant tag (1=Local, 2=Remote), and for Remote a
+/// following length-prefixed peer-id string. Mirrors the Rust enum order.
+ChangeOrigin _uniffiReadChangeOrigin(_UniFfiBinaryReader reader) {
+  final int tag = reader.readI32();
+  switch (tag) {
+    case 1:
+      return const ChangeOrigin.local();
+    case 2:
+      return ChangeOrigin.remote(reader.readString());
+    default:
+      throw StateError('Unknown ChangeOrigin variant tag: $tag');
+  }
 }
 
 DocumentChange _uniffiDecodeDocumentChange(Uint8List bytes) {
