@@ -171,6 +171,24 @@ class PeatFlutterNode {
     ));
   }
 
+  /// Non-blocking variant of [connectPeer]: the dial runs on the native runtime
+  /// and this returns immediately. Use from the UI isolate (the blocking
+  /// [connectPeer] freezes the isolate for the whole dial — ~seconds for an
+  /// unreachable peer). On success the peer surfaces in [connectedPeers].
+  void connectPeerNowait({
+    required String nodeId,
+    List<String> addresses = const [],
+    String? relayUrl,
+    String name = '',
+  }) {
+    _node.connectPeerNowait(PeerInfo(
+      name: name,
+      nodeId: nodeId,
+      addresses: addresses,
+      relayUrl: relayUrl,
+    ));
+  }
+
   /// Current sync statistics (active, bytes sent/received).
   SyncStats get syncStats => _node.syncStats();
 

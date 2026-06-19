@@ -137,7 +137,6 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   final Map<String, String> _knownPeers = {};
   static const _kKnownPeersKey = 'known_peers';
   final Map<String, int> _lastRedialMs = {}; // per-peer redial throttle
-  int _lastRedialSweepMs = 0;                 // global redial throttle
   SyncStats? _syncStats;
   String? _endpointAddr;
   String? _endpointSocketAddr;
@@ -474,6 +473,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       _publishSelf(node);
       _flushMyCounter(node);
 
+      // Auto-reconnect remembered peers so a relaunch re-forms the mesh without
+      // re-scanning a QR. Non-blocking (connectPeerNowait); delayed a touch so
+      // our endpoint is discoverable (pkarr publish) first.
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _node != null) _redialKnownPeers(force: true);
+      });
+
       var _heartbeatTick = 0;
       var _catchupRotor = 0; // round-robins catch-up broadcasts, one per beat
       _peerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
@@ -729,13 +735,11 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         });
         // After the roster updates, surface any node that just went offline.
         _detectNodeDrops();
-        // Remember current peers (symmetric) for the saved-peers list + manual
-        // Reconnect. We do NOT auto-redial here: connectPeer is a blocking FFI
-        // call (~5s for an unreachable peer) and would freeze the UI isolate —
-        // confirmed beachballing macOS at ~5s per offline saved peer. Reconnect
-        // is on-demand via the Saved-peers "Reconnect" button until peat-ffi
-        // exposes a non-blocking connect.
+        // Remember current peers (symmetric) and auto-redial any that went
+        // offline — hands-free reconnect after a drop, no re-scan. Uses the
+        // non-blocking connectPeerNowait so it never freezes the UI isolate.
         _rememberConnectedPeers();
+        _redialKnownPeers();
       });
 
       // Refresh relative timestamps every 10 s
@@ -1203,18 +1207,17 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     final node = _node;
     if (node == null || _knownPeers.isEmpty) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (!force && now - _lastRedialSweepMs < 10000) return; // global throttle
     for (final id in _knownPeers.keys.toList()) {
       if (id == _nodeId || _peers.contains(id)) continue;
       final seen = _nodeSeenLocal[id];
       if (seen != null && now - seen <= _kLivenessWindowMs) continue; // online
-      if (!force && now - (_lastRedialMs[id] ?? 0) < 20000) continue; // per-peer
+      if (!force && now - (_lastRedialMs[id] ?? 0) < 15000) continue; // per-peer throttle
       _lastRedialMs[id] = now;
-      _lastRedialSweepMs = now;
       try {
-        node.connectPeer(nodeId: id); // relay/pkarr discovery resolves the rest
+        // Non-blocking: the dial runs on the native runtime, so we can fire for
+        // every offline known peer each sweep without freezing the UI isolate.
+        node.connectPeerNowait(nodeId: id); // relay/pkarr discovery resolves the rest
       } catch (_) {}
-      if (!force) break;
     }
   }
 

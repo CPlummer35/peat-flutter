@@ -4685,7 +4685,8 @@ class PeatFfiFfi {
 
   late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr) _peatNodeConnectPeerFfiBuffer = _lib.lookupFunction<ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr), void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>('uniffi_ffibuffer_peat_ffi_fn_method_peatnode_connect_peer');
 
-  void peatNodeInvokeConnectPeer(int handle, PeerInfo peer) {
+  void _invokePeerInfoCall(int handle, PeerInfo peer,
+      void Function(ffi.Pointer<_UniFfiFfiBufferElement> a, ffi.Pointer<_UniFfiFfiBufferElement> r) ffiBufferFn) {
     final ffi.Pointer<_UniFfiFfiBufferElement> argBuf = calloc<_UniFfiFfiBufferElement>(4);
     final ffi.Pointer<_UniFfiFfiBufferElement> returnBuf = calloc<_UniFfiFfiBufferElement>(4);
     final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
@@ -4740,7 +4741,7 @@ class PeatFfiFfi {
       (argBuf + 1).ref.u64 = peerRustBuffer.capacity;
       (argBuf + 2).ref.u64 = peerRustBuffer.len;
       (argBuf + 3).ref.ptr = peerRustBuffer.data.cast<ffi.Void>();
-      _peatNodeConnectPeerFfiBuffer(argBuf, returnBuf);
+      ffiBufferFn(argBuf, returnBuf);
       final int statusCode = (returnBuf + 0).ref.i8;
       if (statusCode != _uniFfiRustCallStatusSuccess) {
         final ffi.Pointer<_UniFfiRustBuffer> errBufPtr = calloc<_UniFfiRustBuffer>();
@@ -4790,6 +4791,16 @@ class PeatFfiFfi {
       calloc.free(returnBuf);
     }
   }
+
+  void peatNodeInvokeConnectPeer(int handle, PeerInfo peer) =>
+      _invokePeerInfoCall(handle, peer, _peatNodeConnectPeerFfiBuffer);
+
+  // Non-blocking connect: identical args/return, different uniffi symbol; the
+  // Rust side spawns the dial and returns immediately (no UI-isolate block).
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr) _peatNodeConnectPeerNowaitFfiBuffer = _lib.lookupFunction<ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr), void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>('uniffi_ffibuffer_peat_ffi_fn_method_peatnode_connect_peer_nowait');
+
+  void peatNodeInvokeConnectPeerNowait(int handle, PeerInfo peer) =>
+      _invokePeerInfoCall(handle, peer, _peatNodeConnectPeerNowaitFfiBuffer);
 
   late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr) _peatNodeConnectedPeersFfiBuffer = _lib.lookupFunction<ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr), void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr, ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>('uniffi_ffibuffer_peat_ffi_fn_method_peatnode_connected_peers');
 
@@ -9083,6 +9094,13 @@ final class PeatNode {
   void connectPeer(PeerInfo peer) {
     _ensureOpen();
     _ffi.peatNodeInvokeConnectPeer(_handle, peer);
+  }
+
+  /// Connect to a peer WITHOUT blocking — the dial runs on the Rust runtime and
+  /// this returns immediately. Safe to call from the UI isolate.
+  void connectPeerNowait(PeerInfo peer) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeConnectPeerNowait(_handle, peer);
   }
 
   /// Get list of connected peer IDs
