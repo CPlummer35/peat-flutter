@@ -35,7 +35,15 @@ void main(List<String> args) {
       sharedKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
       bindAddress: '127.0.0.1:0',
       storagePath: tmp.path,
-      transport: null,
+      // Non-null transport (matches the app) — exercises the TransportConfigFFI
+      // encode path, which must serialize all 6 Rust fields incl. enableN0Relay.
+      transport: const TransportConfigFFI(
+        enableBle: true,
+        bleMeshId: null,
+        blePowerProfile: 'balanced',
+        transportPreference: null,
+        collectionRoutesJson: null,
+      ),
     ));
     print('OK   createNode -> ${node.nodeId()}');
 

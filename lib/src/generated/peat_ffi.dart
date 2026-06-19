@@ -1464,6 +1464,10 @@ class TransportConfigFFI {
     /// JSON-encoded CollectionRouteTable for explicit collection->transport bindings.
     /// Collections not listed fall through to PACE/legacy scoring.
     required this.collectionRoutesJson,
+    /// Opt in to n0's hosted iroh relay pool + pkarr DNS (cross-network /
+    /// cellular NAT traversal). OFF by default. Defaulted so existing callers
+    /// need no change; mirrors the Rust field of the same name.
+    this.enableN0Relay = false,
   });
 
   /// Enable Bluetooth LE transport (requires "bluetooth" feature)
@@ -1485,6 +1489,9 @@ class TransportConfigFFI {
   /// JSON-encoded CollectionRouteTable for explicit collection->transport bindings.
   /// Collections not listed fall through to PACE/legacy scoring.
   final String? collectionRoutesJson;
+  /// Opt in to n0's hosted iroh relay pool + pkarr DNS discovery. OFF by
+  /// default. Mirrors the Rust `enable_n0_relay` field.
+  final bool enableN0Relay;
 
   Map<String, dynamic> toJson() {
     return {
@@ -1493,6 +1500,7 @@ class TransportConfigFFI {
       'blePowerProfile': this.blePowerProfile,
       'transportPreference': this.transportPreference == null ? null : (() { final __tmp = this.transportPreference!; return __tmp; })(),
       'collectionRoutesJson': this.collectionRoutesJson,
+      'enableN0Relay': this.enableN0Relay,
     };
   }
 
@@ -1503,6 +1511,7 @@ class TransportConfigFFI {
       blePowerProfile: json['blePowerProfile'] == null ? null : json['blePowerProfile'] as String,
       transportPreference: json['transportPreference'] == null ? null : (() { final __tmp = json['transportPreference']; return (__tmp as List).map((item) => item as String).toList(); })(),
       collectionRoutesJson: json['collectionRoutesJson'] == null ? null : json['collectionRoutesJson'] as String,
+      enableN0Relay: json['enableN0Relay'] as bool? ?? false,
     );
   }
 
@@ -1512,6 +1521,7 @@ class TransportConfigFFI {
     Object? blePowerProfile = _sentinel,
     Object? transportPreference = _sentinel,
     Object? collectionRoutesJson = _sentinel,
+    bool? enableN0Relay,
   }) {
     return TransportConfigFFI(
       enableBle: enableBle ?? this.enableBle,
@@ -1519,21 +1529,22 @@ class TransportConfigFFI {
       blePowerProfile: blePowerProfile == _sentinel ? this.blePowerProfile : blePowerProfile as String?,
       transportPreference: transportPreference == _sentinel ? this.transportPreference : transportPreference as List<String>?,
       collectionRoutesJson: collectionRoutesJson == _sentinel ? this.collectionRoutesJson : collectionRoutesJson as String?,
+      enableN0Relay: enableN0Relay ?? this.enableN0Relay,
     );
   }
 
   @override
   String toString() {
-    return 'TransportConfigFFI(enableBle: $enableBle, bleMeshId: $bleMeshId, blePowerProfile: $blePowerProfile, transportPreference: $transportPreference, collectionRoutesJson: $collectionRoutesJson)';
+    return 'TransportConfigFFI(enableBle: $enableBle, bleMeshId: $bleMeshId, blePowerProfile: $blePowerProfile, transportPreference: $transportPreference, collectionRoutesJson: $collectionRoutesJson, enableN0Relay: $enableN0Relay)';
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is TransportConfigFFI && enableBle == other.enableBle && bleMeshId == other.bleMeshId && blePowerProfile == other.blePowerProfile && transportPreference == other.transportPreference && collectionRoutesJson == other.collectionRoutesJson;
+      other is TransportConfigFFI && enableBle == other.enableBle && bleMeshId == other.bleMeshId && blePowerProfile == other.blePowerProfile && transportPreference == other.transportPreference && collectionRoutesJson == other.collectionRoutesJson && enableN0Relay == other.enableN0Relay;
 
   @override
-  int get hashCode => Object.hash(enableBle, bleMeshId, blePowerProfile, transportPreference, collectionRoutesJson);
+  int get hashCode => Object.hash(enableBle, bleMeshId, blePowerProfile, transportPreference, collectionRoutesJson, enableN0Relay);
 }
 
 /// One transport's link state for a peer (FFI mirror of
@@ -3067,6 +3078,7 @@ void _uniffiWriteTransportConfigFFI(TransportConfigFFI value, _UniFfiBinaryWrite
     writer.writeI8(1);
     writer.writeString(value.collectionRoutesJson!);
   }
+  writer.writeBool(value.enableN0Relay);
 }
 
 Uint8List _uniffiEncodeTransportConfigFFI(TransportConfigFFI value) {
@@ -3082,6 +3094,7 @@ TransportConfigFFI _uniffiReadTransportConfigFFI(_UniFfiBinaryReader reader) {
     blePowerProfile: (() { final int __tag = reader.readI8(); if (__tag == 0) return null; if (__tag != 1) throw StateError('invalid optional tag: $__tag'); return reader.readString(); })(),
     transportPreference: (() { final int __tag = reader.readI8(); if (__tag == 0) return null; if (__tag != 1) throw StateError('invalid optional tag: $__tag'); return (() { final int __len = reader.readI32(); final out = <String>[]; for (var i = 0; i < __len; i++) { out.add(reader.readString()); } return out; })(); })(),
     collectionRoutesJson: (() { final int __tag = reader.readI8(); if (__tag == 0) return null; if (__tag != 1) throw StateError('invalid optional tag: $__tag'); return reader.readString(); })(),
+    enableN0Relay: reader.readBool(),
   );
 }
 
