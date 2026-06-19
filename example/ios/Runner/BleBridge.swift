@@ -56,9 +56,31 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
     var peerCount: Int { connected.count + subscribedCentrals.count }
 
+    // Stable identifiers for CoreBluetooth State Preservation & Restoration.
+    // iOS keys the preserved manager state on these, so they must not change
+    // across launches.
+    private static let centralRestoreId = "com.defenseunicorns.peat.ble.central"
+    private static let peripheralRestoreId = "com.defenseunicorns.peat.ble.peripheral"
+
     func start() {
-        central = CBCentralManager(delegate: self, queue: nil)
-        peripheral = CBPeripheralManager(delegate: self, queue: nil)
+        // Pass a restore identifier so iOS preserves these managers' state and
+        // can relaunch the app — often directly into the BACKGROUND — on a CB
+        // event (a central connecting to our peripheral, a peripheral we asked
+        // to reconnect), then hands the state back via willRestoreState below.
+        // Without it a backgrounded/terminated app goes dark until reopened.
+        //
+        // NOTE: full background-relaunch operation also needs the app to
+        // recreate these managers early in the launch cycle when iOS relaunches
+        // for a BLE event. This app orchestrates BLE from Dart (startBle), which
+        // is not running on a background relaunch, so end-to-end background wake
+        // additionally requires native-side mesh operation during that window —
+        // a follow-up beyond this CoreBluetooth-level foundation.
+        central = CBCentralManager(
+            delegate: self, queue: nil,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: PeatBLEManager.centralRestoreId])
+        peripheral = CBPeripheralManager(
+            delegate: self, queue: nil,
+            options: [CBPeripheralManagerOptionRestoreIdentifierKey: PeatBLEManager.peripheralRestoreId])
     }
 
     // Re-arm scan + advertise after a foreground transition. iOS stops both
@@ -115,6 +137,27 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         ])
     }
 
+    // iOS calls this (before peripheralManagerDidUpdateState) when it relaunches
+    // us and restores the preserved CBPeripheralManager. Re-adopt the restored
+    // GATT service + characteristic so we DON'T re-add a service the system
+    // already holds (re-adding a restored service throws) and can keep notifying
+    // subscribers. iOS resumes the preserved advertisement on its own; a
+    // re-subscribing central re-fires didSubscribeTo, repopulating our list.
+    func peripheralManager(_ pm: CBPeripheralManager, willRestoreState dict: [String: Any]) {
+        blog("peripheral willRestoreState")
+        guard let services =
+                dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService]
+        else { return }
+        serviceAdded = true
+        for svc in services {
+            for ch in svc.characteristics ?? [] {
+                if ch.uuid == PEAT_DOC_CHAR_UUID, let mch = ch as? CBMutableCharacteristic {
+                    docCharacteristic = mch
+                }
+            }
+        }
+    }
+
     func peripheralManagerDidUpdateState(_ pm: CBPeripheralManager) {
         if pm.state == .poweredOn { setupGattService() }
     }
@@ -144,6 +187,28 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     }
 
     // ----- Central role (scan + connect + GATT client) -----
+
+    // iOS calls this (before centralManagerDidUpdateState) when it relaunches us
+    // and restores the preserved CBCentralManager. Re-adopt the restored
+    // peripherals — set ourselves as delegate and re-file them under
+    // connected/discovered — so the existing didConnect / didUpdateValue flow
+    // keeps working. iOS resumes any preserved scan automatically.
+    func centralManager(_ cm: CBCentralManager, willRestoreState dict: [String: Any]) {
+        blog("central willRestoreState")
+        guard let peripherals =
+                dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]
+        else { return }
+        for p in peripherals {
+            p.delegate = self
+            let id = p.identifier.uuidString
+            switch p.state {
+            case .connected, .connecting:
+                connected[id] = p
+            default:
+                discovered[id] = p
+            }
+        }
+    }
 
     func centralManagerDidUpdateState(_ cm: CBCentralManager) {
         if cm.state == .poweredOn {
