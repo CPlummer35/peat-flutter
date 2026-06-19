@@ -56,6 +56,12 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     // of inbound BLE frames doesn't spam the user.
     private var lastBgNotify = Date.distantPast
     private static let bgNotifyMinInterval: TimeInterval = 10
+    // Bounded set of recently-seen inbound frame hashes. The mesh re-broadcasts
+    // unchanged snapshots on a timer (catch-up gossip), so most inbound frames
+    // are repeats; only a NOVEL payload should be able to raise an alert.
+    private var recentFrameHashes: Set<Int> = []
+    private var recentFrameOrder: [Int] = []
+    private static let maxRecentFrames = 512
 
     var localDeviceName = "PEAT_peatwtr-00000000"
 
@@ -114,6 +120,7 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         for (_, p) in connected { central.cancelPeripheralConnection(p) }
         connected.removeAll(); discovered.removeAll(); subscribedCentrals.removeAll()
         notifyQueue.removeAll()
+        recentFrameHashes.removeAll(); recentFrameOrder.removeAll()
         if peripheral?.isAdvertising == true { peripheral.stopAdvertising() }
         peripheral?.removeAllServices()
         serviceAdded = false
@@ -184,8 +191,21 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     // notification authorization the Dart side already requests at startup
     // (iOS authorization is app-wide). CB callbacks run on the main queue
     // (managers created with queue: nil), so touching UIApplication is safe.
-    private func notifyBackgroundDataIfNeeded() {
+    private func notifyBackgroundDataIfNeeded(_ data: Data) {
         guard UIApplication.shared.applicationState != .active else { return }
+        // Suppress re-broadcast (gossip) frames: alert only on a payload we
+        // haven't seen recently. Without this, the mesh's periodic snapshot
+        // re-sends raise a fresh notification every throttle window for a single
+        // change. Dedup by content hash against a bounded recent set.
+        let h = data.hashValue
+        if recentFrameHashes.contains(h) { return }
+        recentFrameHashes.insert(h)
+        recentFrameOrder.append(h)
+        if recentFrameOrder.count > PeatBLEManager.maxRecentFrames {
+            recentFrameHashes.remove(recentFrameOrder.removeFirst())
+        }
+        // A real change still arrives as several distinct new fragments; the
+        // rate limit collapses that burst into a single alert.
         let now = Date()
         guard now.timeIntervalSince(lastBgNotify) >= PeatBLEManager.bgNotifyMinInterval
         else { return }
@@ -203,7 +223,7 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
         for req in requests {
             if let data = req.value {
                 onDataReceived?("central:" + req.central.identifier.uuidString, data)
-                notifyBackgroundDataIfNeeded()
+                notifyBackgroundDataIfNeeded(data)
             }
             pm.respond(to: req, withResult: .success)
         }
@@ -297,7 +317,7 @@ final class PeatBLEManager: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     func peripheral(_ p: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let data = characteristic.value else { return }
         onDataReceived?(p.identifier.uuidString, data)
-        notifyBackgroundDataIfNeeded()
+        notifyBackgroundDataIfNeeded(data)
     }
 
     // ----- Outbound: send to every connected peer (both roles) -----
