@@ -22,6 +22,8 @@ export 'generated/peat_ffi.dart'
         ChangeOrigin,
         PeerInfo,
         PeerTransportState,
+        TransportLink,
+        TransportPathKind,
         NodeInfo,
         NodeStatus,
         CellInfo,
@@ -293,6 +295,17 @@ class PeatFlutterNode {
   /// List all document IDs in [collection].
   List<String> listDocuments(String collection) =>
       _node.listDocuments(collection);
+
+  /// Per-peer transport state — how each peer is currently reachable (iroh/BLE,
+  /// direct/relay, link quality). Currently enumerates peers visible to iroh.
+  /// Returns an empty list rather than throwing if the query fails.
+  List<PeerTransportState> peerTransportStates() {
+    try {
+      return _node.allPeerTransportStates();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   /// A broadcast [Stream] of document change events.
   ///
