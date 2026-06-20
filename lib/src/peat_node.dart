@@ -284,6 +284,12 @@ class PeatFlutterNode {
   String? getRaw(String collection, String docId) =>
       _node.getDocument(collection, docId);
 
+  /// Store a raw JSON document under [collection]/[docId]. Synced across the
+  /// mesh via the universal-document transport (Iroh/WiFi/relay). The
+  /// counterpart to [getRaw].
+  void putRaw(String collection, String docId, String json) =>
+      _node.putDocument(collection, docId, json);
+
   /// List all document IDs in [collection].
   List<String> listDocuments(String collection) =>
       _node.listDocuments(collection);
