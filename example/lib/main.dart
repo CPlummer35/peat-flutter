@@ -3,12 +3,15 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, Directory;
+import 'dart:io' show Platform, Directory, NetworkInterface, InternetAddressType;
 import 'dart:math' show min, Random;
 
 import 'package:flutter/material.dart';
 import 'dart:typed_data';
-import 'package:flutter/services.dart' show SystemUiOverlayStyle, SystemChrome, MethodChannel, EventChannel;
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle, SystemChrome, MethodChannel, EventChannel, Clipboard, ClipboardData;
 import 'package:path_provider/path_provider.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:peat_flutter/peat_flutter.dart';
@@ -101,6 +104,14 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // Short ids of peers that advertise Wi-Fi-Direct capability (Android with
   // Wi-Fi on). The Wi-Fi badge only shows for these — iOS (iPad) is BLE-only.
   Set<int> _wifiPeers = {};
+  // This device's internet uplink is cellular (mobile data) right now. Detected
+  // via connectivity_plus and advertised in the presence doc so peers can show a
+  // cellular badge for nodes on mobile data. iroh can't infer a peer's carrier,
+  // so each node self-reports.
+  bool _onCellular = false;
+  // Short ids of peers that advertise they're on cellular (from presence).
+  Set<int> _cellularPeers = {};
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
   // Android BLE transport bridge (peat-btle pipe) lives in native MainActivity.
   static const MethodChannel _bleChannel = MethodChannel('peat/ble');
   // iOS BLE inbound: native PeatBleBridge streams decrypted 0xAF relay payloads
@@ -125,9 +136,23 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // Survives stop/start so reconnect-triggered re-syncs of unchanged docs are silent.
   final Map<String, int> _contentHashes = {};
   List<String> _peers = [];
+  // Auto-reconnect: peers we've meshed with are remembered (node id -> callsign)
+  // and re-dialed without re-scanning a QR. The node id is stable per device and,
+  // with relay/pkarr discovery enabled, is enough to redial by itself. Persisted
+  // across launches so a restart auto-reconnects. Symmetric: every node remembers
+  // every peer it connects to, so either side heals the link.
+  final Map<String, String> _knownPeers = {};
+  static const _kKnownPeersKey = 'known_peers';
+  final Map<String, int> _lastRedialMs = {}; // per-peer redial throttle
   SyncStats? _syncStats;
   String? _endpointAddr;
   String? _endpointSocketAddr;
+  // This device's primary non-loopback LAN IPv4, resolved once at start. Used
+  // to turn an unspecified bind ("0.0.0.0:port") into a dialable address for
+  // the manual peer-connect token (a physical iPhone can't discover via mDNS
+  // multicast, but it CAN dial this address over unicast QUIC).
+  String? _lanIp;
+  final TextEditingController _peerTokenCtrl = TextEditingController();
   Timer? _peerTimer;
 
   // Cell and Command state
@@ -191,6 +216,15 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // saw it advance, keyed by node id. See the roster builder for rationale.
   final Map<String, int> _nodeHbSeen = {};
   final Map<String, int> _nodeSeenLocal = {};
+  // Heartbeat liveness window for RELAY-ONLY peers (those not in connectedPeers).
+  // Must comfortably exceed the real presence-sync gap, which over the relay
+  // bursts to ~16s — a tighter window false-trips "offline" on a healthy link
+  // (observed: DROP with inPeers=true, hbAge=16s). Directly-connected peers use
+  // connectedPeers instead (see _isOnline), so this only governs the fallback.
+  static const int _kLivenessWindowMs = 45000;
+  // Last-known online state per node id, so an online->offline transition can
+  // fire the "node lost connection" popup exactly once per drop.
+  final Map<String, bool> _wasOnline = {};
 
   // Water supply is a PER-NODE holdings CRDT document: collection 'holdings',
   // keyed by callsign, value = that node's liters count. "yours" = my entry;
@@ -199,6 +233,11 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
   // and survive restarts. A transfer (fulfill) is requestor-entry +qty /
   // leader-entry -qty → the sum is unchanged.
   static const _holdingsCollection = 'holdings';
+  // Node-layer collection used to bridge CRDT-KV updates over the Iroh/Wi-Fi
+  // mesh. The custom 0xAF CRDT frames only travel over BLE; on desktop and the
+  // iOS simulator (no BLE radio) that path is dead, so without this bridge the
+  // CRDT-KV collections (holdings, commands, mission) never cross devices.
+  static const _kCrdtBridgeCollection = 'crdtbridge';
   // Build signature injected at compile time (--dart-define=PEAT_BUILD_ID=...).
   // When it differs from the last value we started with, the app binary was
   // redeployed — so we auto-wipe the persisted store on the next Start to avoid
@@ -291,6 +330,32 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         setState(() => _editingCallsign = false);
       }
     });
+    _initConnectivity();
+    _loadKnownPeers();
+  }
+
+  // Track whether this device is on cellular (mobile data), and re-advertise on
+  // change so peers' cellular badges stay current. connectivity_plus reports a
+  // LIST (a device can be on Wi-Fi + cellular at once); we count cellular if
+  // mobile is present and Wi-Fi/ethernet are not (i.e. mobile is the uplink).
+  Future<void> _initConnectivity() async {
+    void apply(List<ConnectivityResult> r) {
+      final hasMobile = r.contains(ConnectivityResult.mobile);
+      final hasLan = r.contains(ConnectivityResult.wifi) ||
+          r.contains(ConnectivityResult.ethernet);
+      final onCell = hasMobile && !hasLan;
+      if (onCell != _onCellular) {
+        _onCellular = onCell;
+        if (mounted) setState(() {});
+        // Push the new uplink state to peers right away.
+        if (_node != null) _publishSelf(_node!);
+      }
+    }
+
+    try {
+      apply(await Connectivity().checkConnectivity());
+    } catch (_) {}
+    _connSub = Connectivity().onConnectivityChanged.listen(apply);
   }
 
   void _beginEditCallsign() {
@@ -383,6 +448,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         ),
       ));
       node.startSync();
+      _resolveLanIp(); // for the manual peer-connect dial token
       _startBle(node); // auto-start BLE on all platforms
       // Auto-start Wi-Fi Direct on Android too (infra-free LAN for iroh). Still
       // pops the one-time "invite to connect" prompt the first time.
@@ -420,6 +486,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       // heartbeat). The peer's state comes back via its heartbeat re-advertise.
       _publishSelf(node);
       _flushMyCounter(node);
+
+      // Auto-reconnect remembered peers so a relaunch re-forms the mesh without
+      // re-scanning a QR. Non-blocking (connectPeerNowait); delayed a touch so
+      // our endpoint is discoverable (pkarr publish) first.
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _node != null) _redialKnownPeers(force: true);
+      });
 
       var _heartbeatTick = 0;
       var _catchupRotor = 0; // round-robins catch-up broadcasts, one per beat
@@ -547,7 +620,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
           _endpointSocketAddr = _node!.endpointSocketAddr;
           // BLE peers aren't in the iroh connected-set; poll the native bridge.
           // Both Android and iOS expose blePeerCount over the same channel.
-          if ((Platform.isAndroid || Platform.isIOS) && _bleRunning) {
+          if ((Platform.isAndroid || Platform.isIOS || Platform.isMacOS) && _bleRunning) {
             _bleChannel.invokeMethod<int>('blePeerCount').then((c) {
               if (mounted && c != null && c != _blePeerCount) {
                 final rising = _blePeerCount == 0 && c > 0;
@@ -616,16 +689,32 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
           // a node's heartbeat advances we stamp the LOCAL clock; a node is
           // "live" if we saw it advance within the window — skew-immune.
           final localNow = DateTime.now().millisecondsSinceEpoch;
+          // Liveness uses the FRESHEST heartbeat across BOTH presence sources.
+          // The CRDT `nodes` doc omits last_heartbeat (a per-beat PUT would grow
+          // the Automerge history), so it reports 0 — and since CRDT entries win
+          // in `unionNodes`, that 0 would clobber a peer's real heartbeat. The
+          // node-layer `nodes` doc DOES carry the advancing heartbeat and syncs
+          // over iroh, so a relay-only peer that DIALED us (and so isn't in our
+          // connectedPeers set) still registers as live here. Without this the
+          // acceptor showed the dialer offline while the dialer showed us online.
+          final maxHb = <String, int>{};
+          for (final n in _node!.nodes) {
+            if (n.lastHeartbeat > (maxHb[n.id] ?? 0)) maxHb[n.id] = n.lastHeartbeat;
+          }
+          for (final n in crdtNodes) {
+            if (n.lastHeartbeat > (maxHb[n.id] ?? 0)) maxHb[n.id] = n.lastHeartbeat;
+          }
           for (final n in unionNodes) {
+            final hb = maxHb[n.id] ?? n.lastHeartbeat;
             final prevHb = _nodeHbSeen[n.id];
             if (prevHb == null) {
-              _nodeHbSeen[n.id] = n.lastHeartbeat;
-            } else if (n.lastHeartbeat > prevHb) {
-              _nodeHbSeen[n.id] = n.lastHeartbeat;
+              _nodeHbSeen[n.id] = hb;
+            } else if (hb > prevHb) {
+              _nodeHbSeen[n.id] = hb;
               _nodeSeenLocal[n.id] = localNow;
             }
           }
-          final liveCutoff = localNow - const Duration(minutes: 3).inMilliseconds;
+          final liveCutoff = localNow - _kLivenessWindowMs;
           // Connections = nodes THIS device can reach (per-device; not expected
           // to match across devices — that's the Cell's job). Qualifies if:
           // self, a connected peer, recently-advanced presence, OR present in
@@ -658,6 +747,13 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
               return a.name.compareTo(b.name);
             });
         });
+        // After the roster updates, surface any node that just went offline.
+        _detectNodeDrops();
+        // Remember current peers (symmetric) and auto-redial any that went
+        // offline — hands-free reconnect after a drop, no re-scan. Uses the
+        // non-blocking connectPeerNowait so it never freezes the UI isolate.
+        _rememberConnectedPeers();
+        _redialKnownPeers();
       });
 
       // Refresh relative timestamps every 10 s
@@ -680,6 +776,31 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
 
       final sub = node.subscribeChanges().listen((change) {
         if (!mounted) return;
+        // CRDT-KV bridge: a peer published one of its crdt_kv snapshots over the
+        // node/Iroh mesh (see _broadcastCrdt). Merge it back into our local
+        // crdt_kv store so holdings/commands/mission converge without BLE, then
+        // surface it. Bridge docs are plumbing, not user-facing feed entries.
+        if (change.collection == _kCrdtBridgeCollection) {
+          try {
+            // Node-published docs are wrapped as {id, fields:{...}}; _docFields
+            // unwraps to the fields we set in _broadcastCrdt.
+            final fields = _docFields(node.getRaw(change.collection, change.docId));
+            final coll = fields?['coll'] as String?;
+            final hex = fields?['hex'] as String?;
+            if (coll != null && hex != null && hex.isNotEmpty) {
+              node.crdtKvMerge(coll, hex);
+              _refreshCounter(node); // holdings (water) total
+              _refreshMission(node); // mission objective
+              if (mounted) setState(() {}); // commands list re-reads in build
+            }
+          } catch (e) {
+            // A failure here means an inbound snapshot didn't merge, so this
+            // node silently stops converging — log it rather than swallow,
+            // otherwise a broken mesh looks identical to an idle one.
+            debugPrint('[crdt-bridge] merge failed for ${change.docId}: $e');
+          }
+          return;
+        }
         // Internal collections shown elsewhere — skip in the feed.
         if (change.collection == 'nodes' || change.collection == 'mission') return;
         final key = '${change.collection}/${change.docId}';
@@ -831,6 +952,289 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       ? _hostName
       : _callsignCtrl.text.trim();
 
+  // ── Manual peer connect (mDNS-free dial) ────────────────────────────────
+  // A physical iOS device can't run iroh's raw-multicast mDNS discovery (the
+  // multicast entitlement is Apple-restricted and disabled), so it never finds
+  // peers on the LAN automatically. It CAN still dial a known peer over unicast
+  // QUIC. These helpers let one node copy a short token and another node paste
+  // it to connect directly.
+  //
+  // The token carries the node id, a LAN address, and (if one is ever available)
+  // an iroh relay URL. iroh uses whichever path works: the LAN address for a
+  // same-network dial, or a relay to reach a node across the internet.
+  //
+  // CURRENT REALITY: peat-ffi's endpointAddr() exposes no relay (its EndpointAddr
+  // carries only a LAN IP — see _validRelay), and relays can't be enabled from
+  // NodeConfig/TransportConfig. So today this is effectively SAME-NETWORK only.
+  // A true cross-network (5G) dial needs peat-ffi to register the node with a
+  // relay and surface that URL here; until then a phone on cellular has no path
+  // to a peer on home Wi-Fi (use a VPN/overlay like Tailscale to test sooner).
+
+  // Resolve this device's primary non-loopback LAN IPv4 (once). Lets us turn an
+  // unspecified bind address ("0.0.0.0:port") into something a peer can dial.
+  Future<void> _resolveLanIp() async {
+    try {
+      final ifaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+        includeLinkLocal: false,
+      );
+      for (final iface in ifaces) {
+        for (final a in iface.addresses) {
+          if (!a.isLoopback) {
+            if (mounted) setState(() => _lanIp = a.address);
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // The dialable "host:port" for THIS node: the bound socket address, with an
+  // unspecified host (0.0.0.0 / :: / [::]) swapped for the real LAN IP.
+  String? get _dialAddr {
+    final s = _endpointSocketAddr;
+    if (s == null || s.isEmpty) return null;
+    final i = s.lastIndexOf(':');
+    if (i <= 0) return null;
+    final host = s.substring(0, i);
+    final port = s.substring(i + 1);
+    final unspecified =
+        host == '0.0.0.0' || host == '::' || host == '[::]' || host.isEmpty;
+    if (unspecified) {
+      return _lanIp == null ? null : '$_lanIp:$port';
+    }
+    return s;
+  }
+
+  // Whether [s] is a usable iroh relay URL — it must be an http(s) URL.
+  //
+  // IMPORTANT: endpointAddr() does NOT return a relay URL. It returns a Rust
+  // Debug-formatted EndpointAddr, e.g.
+  //   EndpointAddr { id: PublicKey(..), addrs: {Ip(192.168.12.34:49760)} }
+  // — note the addrs carry only a LAN IP and NO relay. peat-ffi's iroh node
+  // isn't registered with a relay, and NodeConfig/TransportConfig expose no way
+  // to enable one, so there is currently no cross-network (5G) relay path. This
+  // guard rejects that debug string so the token falls back to LAN-address
+  // dialing (which works same-network). If peat-ffi ever hands back a real relay
+  // URL, it passes here and cross-network dialing lights up for free.
+  static bool _validRelay(String? s) =>
+      s != null && (s.startsWith('http://') || s.startsWith('https://'));
+
+  // Compact, copy/paste-able token encoding {node id, [LAN addr], [relay URL]}.
+  // Carries the LAN address (same-network dial) and a relay URL when one is
+  // available (cross-network dial). Today endpointAddr provides no relay, so the
+  // token is LAN-only and is null until a LAN address resolves.
+  String? _myDialToken() {
+    final id = _nodeId;
+    if (id == null) return null;
+    final addr = _dialAddr;                 // LAN host:port, may be null
+    final relay = _endpointAddr;            // iroh relay/derp URL, may be null
+    final hasRelay = _validRelay(relay);
+    if (addr == null && !hasRelay) return null; // nothing dialable yet
+    final m = <String, String>{'n': id};
+    if (addr != null) m['a'] = addr;
+    if (hasRelay) m['r'] = relay!;
+    return base64Encode(utf8.encode(jsonEncode(m)));
+  }
+
+  // Decode a pasted/scanned token and dial that peer (no discovery needed).
+  // Returns the dialed peer's node id, or null if the token was invalid or the
+  // dial threw. Set [announce] false to suppress the "Dialing…" toast (the scan
+  // flow shows its own "Connecting…" progress instead).
+  String? _connectToPeerToken(String token, {bool announce = true}) {
+    final node = _node;
+    if (node == null) return null;
+    // 1) Decode + validate the token shape (separate from the dial, so a real
+    //    connection failure isn't mislabeled "invalid token").
+    String? id, addr, relay;
+    try {
+      final m = jsonDecode(utf8.decode(base64Decode(token.trim())))
+          as Map<String, dynamic>;
+      id = m['n'] as String?;
+      addr = m['a'] as String?;
+      relay = m['r'] as String?;
+      if (id == null || id.isEmpty) {
+        throw const FormatException('missing node id');
+      }
+    } catch (e) {
+      debugPrint('[dial] bad token: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Invalid token: $e'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return null;
+    }
+    // 2) Dial. Hand iroh both paths; it picks whichever connects — the LAN
+    //    address on the same network, or the relay across the internet.
+    final useRelay = _validRelay(relay);
+    debugPrint('[dial] id=${id.substring(0, 8)} addr=$addr '
+        'relay=$relay useRelay=$useRelay');
+    try {
+      node.connectPeer(
+        nodeId: id,
+        addresses: (addr != null && addr.isNotEmpty) ? [addr] : const [],
+        relayUrl: useRelay ? relay : null,
+      );
+    } catch (e) {
+      debugPrint('[dial] connectPeer failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Dial failed: $e'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return null;
+    }
+    // Push our state to the freshly-dialed peer right away; the 5s periodic
+    // requestSync (started with the node) pulls theirs.
+    _publishSelf(node);
+    _flushMyCounter(node);
+    _rememberPeer(id, ''); // remember for auto-reconnect (name fills in later)
+    _peerTokenCtrl.clear();
+    if (announce && mounted) {
+      final via = addr ?? (useRelay ? 'relay' : null);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Dialing ${id.substring(0, 8)}…'
+            '${via != null ? ' via $via' : ''}'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    return id;
+  }
+
+  // Open the camera scanner, then dial whatever token it reads. The QR carries
+  // the {node id, LAN addr [, relay URL]} token. Today the dial is same-network
+  // (LAN address); cross-network needs a relay URL, which peat-ffi doesn't
+  // expose yet (see _validRelay).
+  Future<void> _scanPeerQr() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const _QrScanPage()),
+    );
+    if (code == null || code.isEmpty || !mounted) return;
+    _peerTokenCtrl.text = code;
+    // Issue the dial; the scan flow shows its own progress so suppress the toast.
+    final peerId = _connectToPeerToken(code, announce: false);
+    if (peerId == null || !mounted) return; // error already surfaced
+
+    // Blocking "Connecting…" dialog while iroh establishes the link. iroh's dial
+    // is async with no completion callback, so we poll for the peer to appear in
+    // the connected set or roster, with a timeout.
+    final short = peerId.length >= 8 ? peerId.substring(0, 8) : peerId;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(children: [
+          const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 16),
+          Expanded(child: Text('Connecting to $short…')),
+        ]),
+      ),
+    );
+
+    var connected = false;
+    for (var i = 0; i < 24; i++) {
+      // ~12s
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      final peers = _node?.connectedPeers ?? const [];
+      if (peers.contains(peerId) || _roster.any((n) => n.id == peerId)) {
+        connected = true;
+        break;
+      }
+    }
+    if (mounted) Navigator.of(context, rootNavigator: true).pop(); // close dialog
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(connected
+            ? 'Connected to $short'
+            : 'Still connecting to $short… give it a moment.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  // ── Auto-reconnect (known peers) ─────────────────────────────────────────
+
+  // Load remembered peers from prefs into _knownPeers (called once at startup).
+  Future<void> _loadKnownPeers() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_kKnownPeersKey);
+      if (raw == null) return;
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          _knownPeers
+            ..clear()
+            ..addAll(m.map((k, v) => MapEntry(k, v.toString())));
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _persistKnownPeers() {
+    SharedPreferences.getInstance()
+        .then((p) => p.setString(_kKnownPeersKey, jsonEncode(_knownPeers)))
+        .catchError((_) => false);
+  }
+
+  // Remember a peer for auto-reconnect. Persists only on a real change. A blank
+  // name is kept as a placeholder until the callsign resolves from the roster.
+  void _rememberPeer(String id, String name) {
+    if (id.isEmpty || id == _nodeId || id.length < 16) return;
+    final clean =
+        (name.isNotEmpty && name != id) ? name : (_knownPeers[id] ?? '');
+    if (_knownPeers.containsKey(id) && _knownPeers[id] == clean) return;
+    setState(() => _knownPeers[id] = clean);
+    _persistKnownPeers();
+  }
+
+  void _forgetPeer(String id) {
+    if (_knownPeers.remove(id) != null) {
+      setState(() {});
+      _persistKnownPeers();
+    }
+  }
+
+  // Refresh remembered peers from the current connected set + roster names.
+  void _rememberConnectedPeers() {
+    for (final id in _peers) {
+      _rememberPeer(id, _nodeNames[id] ?? '');
+    }
+    for (final n in _roster) {
+      if (_knownPeers.containsKey(n.id)) _rememberPeer(n.id, n.name);
+    }
+  }
+
+  // Re-dial remembered peers that aren't currently reachable. connectPeer is a
+  // BLOCKING FFI call (awaits connect + handshake), so periodic sweeps redial at
+  // most one peer and are globally throttled to avoid UI jank; [force] (used on
+  // node start) redials every offline known peer at once.
+  void _redialKnownPeers({bool force = false}) {
+    final node = _node;
+    if (node == null || _knownPeers.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final id in _knownPeers.keys.toList()) {
+      if (id == _nodeId || _peers.contains(id)) continue;
+      final seen = _nodeSeenLocal[id];
+      if (seen != null && now - seen <= _kLivenessWindowMs) continue; // online
+      if (!force && now - (_lastRedialMs[id] ?? 0) < 15000) continue; // per-peer throttle
+      _lastRedialMs[id] = now;
+      try {
+        // Non-blocking: the dial runs on the native runtime, so we can fire for
+        // every offline known peer each sweep without freezing the UI isolate.
+        node.connectPeerNowait(nodeId: id); // relay/pkarr discovery resolves the rest
+      } catch (_) {}
+    }
+  }
+
   Future<void> _resetDatabase() async {
     if (_node != null) return; // must be stopped first
     try {
@@ -913,10 +1317,10 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         node.publishSelf(nodeId: id, name: _callsign, capabilities: _myCapabilities);
         return null;
       });
-    } else if (Platform.isIOS) {
-      // iOS: publish via the Dart node layer directly (no JNI channel). This is
-      // what reaches startOutboundFrames -> BLE; publishRaw/publishSelf write
-      // to storage_backend and emit nothing.
+    } else if (Platform.isIOS || Platform.isMacOS) {
+      // iOS/macOS: publish via the Dart node layer directly (no JNI channel).
+      // This is what reaches startOutboundFrames -> BLE; publishRaw/publishSelf
+      // write to storage_backend and emit nothing.
       try {
         node.publishDocument('nodes', json);
       } catch (_) {
@@ -943,6 +1347,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       // Wi-Fi-Direct capable? (Android with Wi-Fi on). iOS is BLE-only, so the
       // Wi-Fi badge only shows between nodes that both advertise this.
       'wifi': Platform.isAndroid && _wifiDirectOn,
+      // This node's internet uplink is cellular (mobile data) right now.
+      'cellular': _onCellular,
     });
     if (stableJson != _lastSelfNodeJson) {
       _lastSelfNodeJson = stableJson;
@@ -1079,6 +1485,37 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
       envelopes.add(env);
     }
     _sendCrdtFrames(envelopes);
+    // Also bridge this update over the node-layer mesh (Iroh/Wi-Fi). The frames
+    // above only reach BLE peers; this lets the CRDT-KV collections converge on
+    // transports the node already runs natively — the only path that works on
+    // desktop and the iOS simulator. We publish the collection's FULL snapshot
+    // (not just this delta) as a single LWW doc keyed by source collection, so
+    // a missed publish self-heals on the next one and the receiver always sees
+    // complete state. The receiver merges it back into its crdt_kv store (see
+    // subscribeChanges). Automerge merges are idempotent, so this coexists
+    // harmlessly with the BLE path on devices that have both radios.
+    final node = _node;
+    if (node != null) {
+      try {
+        final snapHex = node.crdtKvSnapshot(collection);
+        // Key the bridge doc per (sender, collection) so two nodes don't clobber
+        // a shared doc id — each publishes its own snapshot and the receiver
+        // merges them independently (mirrors how the `nodes` doc is callsign-
+        // keyed). `coll` carries the real target collection for the merge.
+        node.publishDocument(
+          _kCrdtBridgeCollection,
+          jsonEncode({
+            'id': '$collection@$_callsign',
+            'coll': collection,
+            'hex': snapHex,
+          }),
+        );
+      } catch (_) {
+        // publish_document's Dart binding throws on return-value decode (a
+        // stale-binding bug), but the publish side-effect has already fanned the
+        // doc out over the mesh by then — so the bridge still works. Swallow.
+      }
+    }
   }
 
   // Send the fragment envelopes over the native BLE bridge. Both platforms now
@@ -1245,11 +1682,202 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         node.putCell(cell);
         return null;
       });
-    } else if (Platform.isIOS) {
-      try { node.publishDocument('cells', cellJson); } catch (_) { node.putCell(cell); }
     } else {
-      node.putCell(cell);
+      // Node-layer publish carries `members` and persists locally (readable via
+      // getRaw) + fans out over the mesh. publish_document's Dart binding throws
+      // on return-value decode (a stale-binding bug) AFTER the write completes,
+      // so swallow it. Do NOT fall back to putCell: it writes a flat, memberless
+      // doc that the next refresh reads back, wiping membership — the "added
+      // node reverts" bug.
+      try { node.publishDocument('cells', cellJson); } catch (_) {}
     }
+  }
+
+  // ── Presence / transport indicators (shared by Connections, Members,
+  //    Available Nodes) ────────────────────────────────────────────────────
+
+  // Find the live roster entry for a callsign (the roster is this device's set
+  // of currently-reachable nodes), or null if that callsign isn't reachable.
+  NodeInfo? _rosterByCallsign(String callsign) {
+    for (final n in _roster) {
+      if (n.name == callsign) return n;
+    }
+    return null;
+  }
+
+  // Is this roster node currently reachable? connectedPeers (the live QUIC link)
+  // is authoritative — while a peer is in it, it's online regardless of presence-
+  // sync gaps (those bursts to ~16s and would otherwise flicker the dot). For a
+  // RELAY-ONLY peer that isn't in connectedPeers, fall back to heartbeat
+  // freshness within the (wide) window. A node seen only via the persisted CRDT
+  // presence doc, with no recent heartbeat, reads offline.
+  bool _isOnline(NodeInfo n) {
+    if (n.id == _nodeId) return true;
+    if (_peers.contains(n.id)) return true; // live link — authoritative
+    final seen = _nodeSeenLocal[n.id];
+    return seen != null &&
+        DateTime.now().millisecondsSinceEpoch - seen <= _kLivenessWindowMs;
+  }
+
+  // Compare each roster node's online state to last cycle; on an online->offline
+  // transition, pop a "lost connection" notice (once per drop). Self is skipped.
+  void _detectNodeDrops() {
+    for (final n in _roster) {
+      if (n.id == _nodeId) continue;
+      final online = _isOnline(n);
+      if ((_wasOnline[n.id] ?? false) && !online) _showNodeLostPopup(n);
+      _wasOnline[n.id] = online;
+    }
+    // Forget ids that dropped out of the roster entirely (avoid unbounded growth
+    // and stop a re-appearing node from instantly counting as a fresh "drop").
+    _wasOnline.removeWhere((id, _) => !_roster.any((n) => n.id == id));
+  }
+
+  // "Node lost connection" popup. We can't get the peer's true OS-level reason
+  // (a suspended/vanished phone tells us nothing), so we report the observable
+  // cause — its heartbeat stopped — plus the most likely explanation, and note
+  // whether the connection is already torn down or merely gone quiet.
+  void _showNodeLostPopup(NodeInfo n) {
+    if (!mounted) return;
+    final seen = _nodeSeenLocal[n.id];
+    final ageS = seen == null
+        ? null
+        : ((DateTime.now().millisecondsSinceEpoch - seen) / 1000).round();
+    final stale = ageS == null ? 'stopped' : 'no heartbeat for ${ageS}s';
+    final reason = _peers.contains(n.id)
+        ? '$stale (link still open) — peer likely backgrounded/locked or frozen'
+        : '$stale — peer likely backgrounded/locked the app or lost its network';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        const Icon(Icons.link_off, color: Colors.white, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text('${n.name} lost connection — $reason')),
+      ]),
+      backgroundColor: Colors.red.shade700,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 5),
+    ));
+  }
+
+  // Small filled dot: green when the node is currently reachable (online), grey
+  // when it's a committed member we can't reach right now (offline).
+  Widget _presenceDot(bool online) => Container(
+        width: 7,
+        height: 7,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: online ? Colors.green : Colors.grey,
+        ),
+      );
+
+  // Live carrier badge(s) for a reachable roster node — how THIS device reaches
+  // it: person (self), bluetooth (direct BLE) [+ wifi when a Wi-Fi-Direct tunnel
+  // is up and the peer advertises it], or alt_route (relayed / multi-hop). This
+  // is the same direct-vs-relayed logic the Connections list uses, factored out
+  // so Members and Available Nodes show the same source icons.
+  List<Widget> _transportIcons(NodeInfo n, ThemeData theme) {
+    final isMe = n.id == _nodeId;
+    int? shortId;
+    try {
+      shortId = int.parse(n.id.substring(0, 8), radix: 16);
+    } catch (_) {}
+    final myShort = _nodeId != null && _nodeId!.length >= 8
+        ? int.tryParse(_nodeId!.substring(0, 8), radix: 16)
+        : null;
+    // Direct if we're fully meshed (linked to at least as many BLE peers as
+    // there are other nodes), or we positively identify the link (our
+    // blePeerIds, or the peer advertises us — BLE links are bidirectional).
+    final otherCount = _roster.length - 1;
+    final fullyMeshed = otherCount > 0 && _blePeerCount >= otherCount;
+    final isDirect = !isMe &&
+        (fullyMeshed ||
+            (shortId != null &&
+                (_directPeerIds.contains(shortId) ||
+                    (myShort != null &&
+                        (_advertisedDirect[shortId]?.contains(myShort) ??
+                            false)))));
+    const bleBlue = Color(0xFF2196F3);
+    final out = <Widget>[];
+    if (isMe) {
+      out.add(Icon(Icons.person, size: 14, color: theme.colorScheme.primary));
+    } else if (isDirect) {
+      out.add(const Icon(Icons.bluetooth, size: 14, color: bleBlue));
+      if (_wifiTunnelPeers > 0 &&
+          shortId != null &&
+          _wifiPeers.contains(shortId)) {
+        out.add(const Icon(Icons.wifi, size: 14, color: Colors.green));
+      }
+    } else {
+      out.add(Icon(Icons.alt_route, size: 14, color: Colors.orange.shade700));
+    }
+    // Cellular badge: the node reports its uplink is mobile data (self from our
+    // own connectivity, peers from their advertised `cellular` flag). Additive —
+    // it sits alongside the carrier/relay icon to flag a node on cellular.
+    final onCell =
+        (isMe && _onCellular) || (shortId != null && _cellularPeers.contains(shortId));
+    if (onCell) {
+      out.add(Icon(Icons.signal_cellular_alt, size: 14, color: Colors.teal.shade400));
+    }
+    return out;
+  }
+
+  // Grey dot + cloud-off badge: a node we can't currently reach.
+  Widget _offlineIcons(ThemeData theme) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _presenceDot(false),
+          const SizedBox(width: 5),
+          Icon(Icons.cloud_off, size: 14, color: theme.colorScheme.outline),
+        ],
+      );
+
+  // Leading online + source indicator for a roster NodeInfo. Online → green dot
+  // + live carrier badge(s) (BLE / Wi-Fi / relayed); offline → grey + cloud-off.
+  Widget _nodeStatusIcons(NodeInfo n, ThemeData theme) {
+    if (!_isOnline(n)) return _offlineIcons(theme);
+    final badges = <Widget>[_presenceDot(true), const SizedBox(width: 5)];
+    final icons = _transportIcons(n, theme);
+    for (var i = 0; i < icons.length; i++) {
+      if (i > 0) badges.add(const SizedBox(width: 2));
+      badges.add(icons[i]);
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: badges);
+  }
+
+  // Leading online + source indicator for a CALLSIGN (cell lists). Resolves the
+  // callsign to a roster node and shows its live status; a committed member with
+  // no presence at all (not in the roster) is offline → grey + cloud-off.
+  Widget _callsignStatusIcons(String callsign, ThemeData theme) {
+    final node = _rosterByCallsign(callsign);
+    return node == null ? _offlineIcons(theme) : _nodeStatusIcons(node, theme);
+  }
+
+  // Compact legend explaining the presence dot + source icons.
+  Widget _connectionLegend(ThemeData theme) {
+    const bleBlue = Color(0xFF2196F3);
+    final style = theme.textTheme.labelSmall
+        ?.copyWith(fontSize: 10, color: theme.colorScheme.outline);
+    Widget item(Widget icon, String label) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [icon, const SizedBox(width: 3), Text(label, style: style)],
+        );
+    return Wrap(
+      spacing: 10,
+      runSpacing: 2,
+      children: [
+        item(_presenceDot(true), 'online'),
+        item(const Icon(Icons.bluetooth, size: 12, color: bleBlue), 'BLE'),
+        item(const Icon(Icons.wifi, size: 12, color: Colors.green), 'Wi-Fi'),
+        item(Icon(Icons.alt_route, size: 12, color: Colors.orange.shade700),
+            'relayed'),
+        item(
+            Icon(Icons.signal_cellular_alt,
+                size: 12, color: Colors.teal.shade400),
+            'cellular'),
+        item(Icon(Icons.cloud_off, size: 12, color: theme.colorScheme.outline),
+            'offline'),
+      ],
+    );
   }
 
   Widget _buildCellCard(ThemeData theme) {
@@ -1333,8 +1961,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: Row(children: [
-                      const Icon(Icons.check_circle,
-                          size: 14, color: Colors.green),
+                      _callsignStatusIcons(callsign, theme),
                       const SizedBox(width: 6),
                       Expanded(child: Text(callsign,
                           style: theme.textTheme.bodySmall)),
@@ -1364,8 +1991,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
                       ...available.map((n) => Padding(
                         padding: const EdgeInsets.symmetric(vertical: 2),
                         child: Row(children: [
-                          Icon(Icons.radio_button_unchecked,
-                              size: 14, color: theme.colorScheme.outline),
+                          _callsignStatusIcons(n.name, theme),
                           const SizedBox(width: 6),
                           Expanded(child: Text(n.name,
                               style: theme.textTheme.bodySmall)),
@@ -1438,6 +2064,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     final out = <NodeInfo>[];
     final advertised = <int, Set<int>>{};
     final wifiPeers = <int>{};
+    final cellularPeers = <int>{};
     try {
       final map = jsonDecode(node.crdtKvAll('nodes')) as Map<String, dynamic>;
       for (final v in map.values) {
@@ -1453,6 +2080,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
               .map((e) => (e as num).toInt())
               .toSet();
           if (v['wifi'] == true) wifiPeers.add(short);
+          if (v['cellular'] == true) cellularPeers.add(short);
         }
         final caps = (v['capabilities'] as List?)
                 ?.map((e) => e.toString())
@@ -1477,6 +2105,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     } catch (_) {}
     _advertisedDirect = advertised;
     _wifiPeers = wifiPeers;
+    _cellularPeers = cellularPeers;
     return out;
   }
 
@@ -1850,7 +2479,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     //   inbound : EventChannel relay payload (the same envelope, 0xAF-marked)
     //             -> unwrap -> ingestInboundFrame / ingestInboundLiteFrame.
     // The envelope is byte-identical to the Android BleBridge.kt wire format.
-    if (Platform.isIOS) {
+    if (Platform.isIOS || Platform.isMacOS) {
       // peat-btle node id: a stable 32-bit derived from the peat-ffi node id.
       final int bleNodeId = int.parse(node.nodeId.substring(0, 8), radix: 16);
       _bleChannel.invokeMethod('startBle', {
@@ -2003,7 +2632,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     }
     // iOS: stop the native radio + the inbound ingest BEFORE disposing the
     // node, so a late relay frame can't call ingest* on a freed node.
-    if (Platform.isIOS) {
+    if (Platform.isIOS || Platform.isMacOS) {
       _bleRxSub?.cancel();
       _bleRxSub = null;
       _bleChannel.invokeMethod('stopBle').catchError((_) => null);
@@ -2056,6 +2685,8 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     _changeLogTimer?.cancel();
     _callsignCtrl.dispose();
     _callsignFocus.dispose();
+    _peerTokenCtrl.dispose();
+    _connSub?.cancel();
     _node?.dispose();
     super.dispose();
   }
@@ -2093,10 +2724,19 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-      resizeToAvoidBottomInset: false,
+      // Let the body shrink when the keyboard opens so the focused field scrolls
+      // into view instead of being hidden behind the keyboard (every tab is
+      // scrollable, so this just reflows; was false, which made the keyboard
+      // cover the bottom half of the screen).
+      resizeToAvoidBottomInset: true,
       // No AppBar — we draw the blue header manually so tabs sit flush
       // against the safe area with zero dead space.
-      body: Column(children: [
+      // Tap anywhere outside a text field to dismiss the keyboard (iOS has no
+      // built-in dismiss for multiline fields like the paste-token box).
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        child: Column(children: [
         // Blue header: status bar inset + tab bar, no toolbar height gap
         Material(
           color: const Color(0xFF2768D4),
@@ -2336,72 +2976,19 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
                           style: theme.textTheme.labelMedium
                               ?.copyWith(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
+                      // Legend for the online + source icons used in every list.
+                      _connectionLegend(theme),
+                      const SizedBox(height: 4),
                       ..._roster.map((n) {
-                        final isMe = n.id == _nodeId;
-                        // Direct vs relayed: the BLE bridge reports the node-ids
-                        // (32-bit = first 8 hex of the full id) of peers we're
-                        // DIRECTLY connected to. A roster node not in that set is
-                        // reachable only through another node (multi-hop) — it
-                        // still synced here via the CRDT relay. Nothing is
-                        // "disconnected": everything listed IS reachable.
-                        int? shortId;
-                        try {
-                          shortId = int.parse(n.id.substring(0, 8), radix: 16);
-                        } catch (_) {}
-                        final myShort = _nodeId != null && _nodeId!.length >= 8
-                            ? int.tryParse(_nodeId!.substring(0, 8), radix: 16)
-                            : null;
-                        // Direct if: we're fully meshed (connected to at least as
-                        // many BLE peers as there are OTHER nodes — so every peer
-                        // must be a direct link), OR we positively identify the
-                        // link (our blePeerIds, or the peer advertises us — a BLE
-                        // link is bidirectional). The mesh-count check covers the
-                        // case where peat-btle reports a connection as nodeId=0 so
-                        // we can't match it per-peer, but we ARE linked to everyone.
-                        final otherCount = _roster.length - 1;
-                        final fullyMeshed =
-                            otherCount > 0 && _blePeerCount >= otherCount;
-                        final isDirect = !isMe &&
-                            (fullyMeshed ||
-                                (shortId != null &&
-                                    (_directPeerIds.contains(shortId) ||
-                                        (myShort != null &&
-                                            (_advertisedDirect[shortId]
-                                                    ?.contains(myShort) ??
-                                                false)))));
-                        const bleBlue = Color(0xFF2196F3);
-                        final transports = <Widget>[];
-                        if (isMe) {
-                          transports.add(Icon(Icons.person,
-                              size: 14, color: theme.colorScheme.primary));
-                        } else if (isDirect) {
-                          // Direct BLE neighbor. Add the Wi-Fi badge ONLY if the
-                          // peer is Wi-Fi-Direct-capable (advertised) AND we have
-                          // a tunnel up — Wi-Fi Direct is Android-only, so the
-                          // iPad (iOS, BLE-only) never gets it.
-                          transports.add(const Icon(Icons.bluetooth,
-                              size: 14, color: bleBlue));
-                          if (_wifiTunnelPeers > 0 &&
-                              shortId != null &&
-                              _wifiPeers.contains(shortId)) {
-                            transports.add(const Icon(Icons.wifi,
-                                size: 14, color: Colors.green));
-                          }
-                        } else {
-                          // Relayed / multi-hop: reachable via another node.
-                          transports.add(Icon(Icons.alt_route,
-                              size: 14, color: Colors.orange.shade700));
-                        }
+                        // Online + source indicator. A node still listed but with
+                        // no recent heartbeat (lingering only via persisted CRDT
+                        // presence) shows grey + cloud_off; a live node shows the
+                        // green dot + its carrier: person (self), bluetooth
+                        // (direct BLE) [+ wifi], or alt_route (relayed/multi-hop).
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 3),
                           child: Row(children: [
-                            // One badge per live carrier (BLE blue, Wi-Fi green).
-                            Row(mainAxisSize: MainAxisSize.min, children: [
-                              for (var i = 0; i < transports.length; i++) ...[
-                                if (i > 0) const SizedBox(width: 2),
-                                transports[i],
-                              ],
-                            ]),
+                            _nodeStatusIcons(n, theme),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Column(
@@ -2680,7 +3267,7 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
                   if (Platform.isAndroid)
                     _aboutRow(theme, 'Peers (Wi-Fi)', '$_wifiTunnelPeers connected'),
                 ],
-                if ((Platform.isAndroid || Platform.isIOS) && _bleRunning)
+                if ((Platform.isAndroid || Platform.isIOS || Platform.isMacOS) && _bleRunning)
                   _aboutRow(theme, 'Peers (BLE)', '$_blePeerCount connected'),
                 if (Platform.isAndroid) ...[
                   _aboutRow(theme, 'Wi-Fi Direct', _wifiDirectStatus),
@@ -2752,6 +3339,177 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
                     for (final p in _peers)
                       _aboutRow(theme, '·',
                           p.length > 24 ? '${p.substring(0, 24)}…' : p),
+                  const SizedBox(height: 12),
+                  Text('Manual Peer Connect',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(
+                    _myCapabilities.contains('leader')
+                        ? 'You are the leader. Followers on the SAME network scan '
+                            'this QR (or paste the token) to join. (Cross-network '
+                            '/ cellular needs a relay, not yet available.)'
+                        : 'A phone can\'t discover peers via mDNS. Scan the '
+                            'leader\'s QR (or paste their token) to dial in on the '
+                            'SAME network. (Cellular needs a relay — not yet.)',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                        fontStyle: FontStyle.italic),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_myDialToken() != null) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('My token',
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(fontWeight: FontWeight.w600)),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            Clipboard.setData(
+                                ClipboardData(text: _myDialToken()!));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Token copied — paste it on another node'),
+                                    behavior: SnackBarBehavior.floating));
+                          },
+                          icon: const Icon(Icons.copy, size: 16),
+                          label: const Text('Copy'),
+                        ),
+                      ],
+                    ),
+                    // Only the LEADER publishes a scannable QR — it's the
+                    // party's join target. Followers scan it (below) to dial in.
+                    // The QR encodes the token (node id + LAN addr [+ relay URL
+                    // when one exists]). Same-network today; cross-network once a
+                    // relay is available. (Copy/paste stays available as fallback.)
+                    if (_myCapabilities.contains('leader')) ...[
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white, // QR needs a light quiet zone
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: QrImageView(
+                            data: _myDialToken()!,
+                            version: QrVersions.auto,
+                            size: 180,
+                            backgroundColor: Colors.white,
+                            errorStateBuilder: (_, __) => const SizedBox(
+                              width: 180,
+                              height: 180,
+                              child:
+                                  Center(child: Text('Token too long for QR')),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    SelectableText(
+                      _myDialToken()!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          fontFamily: 'monospace', fontSize: 11),
+                    ),
+                    const SizedBox(height: 8),
+                  ] else
+                    Text(
+                      'My token: resolving address…',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.outline),
+                    ),
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _peerTokenCtrl,
+                          style: const TextStyle(fontSize: 12),
+                          minLines: 1,
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                            hintText: 'Paste a peer token',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () =>
+                            _connectToPeerToken(_peerTokenCtrl.text),
+                        child: const Text('Connect'),
+                      ),
+                    ],
+                  ),
+                  // Followers scan the leader's QR to join — the no-typing path.
+                  // Mobile only (desktop has no camera); hidden for the leader,
+                  // which DISPLAYS the QR rather than scanning one.
+                  if ((Platform.isIOS || Platform.isAndroid) &&
+                      !_myCapabilities.contains('leader')) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _scanPeerQr,
+                        icon: const Icon(Icons.qr_code_scanner, size: 18),
+                        label: const Text("Scan leader's QR"),
+                      ),
+                    ),
+                  ],
+                  // Remembered peers — auto-redialed on launch and after drops,
+                  // so reconnecting never needs another QR scan.
+                  if (_knownPeers.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Expanded(
+                        child: Text('Saved peers (${_knownPeers.length})',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w600)),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _redialKnownPeers(force: true),
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Reconnect'),
+                      ),
+                    ]),
+                    ..._knownPeers.entries.map((e) {
+                      final id = e.key;
+                      final label = e.value.isNotEmpty
+                          ? e.value
+                          : '${id.substring(0, 8)}…';
+                      final online = _peers.contains(id) ||
+                          (_nodeSeenLocal[id] != null &&
+                              DateTime.now().millisecondsSinceEpoch -
+                                      _nodeSeenLocal[id]! <=
+                                  _kLivenessWindowMs);
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(children: [
+                          _presenceDot(online),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Text(label,
+                                  style: theme.textTheme.bodySmall)),
+                          InkWell(
+                            onTap: () => _forgetPeer(id),
+                            child: Icon(Icons.close,
+                                size: 16, color: theme.colorScheme.outline),
+                          ),
+                        ]),
+                      );
+                    }),
+                    Text(
+                      'Auto-reconnects on launch and after drops — no re-scan.',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                          fontStyle: FontStyle.italic),
+                    ),
+                  ],
                 ],
                 if (_nodeId == null)
                   Text('Start a node to see details.',
@@ -2809,7 +3567,81 @@ class _PeatExampleHomeState extends State<PeatExampleHome>
         )), // TabBarView + Expanded
         ], // Column children (header + content)
       ), // Column body
+      ), // GestureDetector (tap-to-dismiss keyboard)
       ), // Scaffold
     ); // DefaultTabController
+  }
+}
+
+// Full-screen camera scanner. Pops the first non-empty QR/barcode value back to
+// the caller (a peat dial token), which then dials the peer. The MobileScanner
+// widget auto-starts the controller we pass and stops it on dispose; we own the
+// controller so we dispose it ourselves.
+class _QrScanPage extends StatefulWidget {
+  const _QrScanPage();
+
+  @override
+  State<_QrScanPage> createState() => _QrScanPageState();
+}
+
+class _QrScanPageState extends State<_QrScanPage> {
+  final MobileScannerController _controller = MobileScannerController(
+    formats: const [BarcodeFormat.qrCode],
+  );
+  bool _handled = false; // guard: detection fires repeatedly per frame
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_handled) return;
+    String? raw;
+    for (final b in capture.barcodes) {
+      if (b.rawValue != null && b.rawValue!.isNotEmpty) {
+        raw = b.rawValue;
+        break;
+      }
+    }
+    if (raw == null) return;
+    _handled = true;
+    Navigator.of(context).pop(raw);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scan leader QR')),
+      body: Stack(
+        alignment: Alignment.center,
+        children: [
+          MobileScanner(controller: _controller, onDetect: _onDetect),
+          // Simple reticle to aim with.
+          Container(
+            width: 240,
+            height: 240,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.white, width: 3),
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          Positioned(
+            bottom: 48,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text("Point at the leader's QR code",
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

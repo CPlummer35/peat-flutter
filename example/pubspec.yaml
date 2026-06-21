@@ -18,6 +18,9 @@ dependencies:
   path_provider: ^2.1.0
   shared_preferences: ^2.3.0
   device_info_plus: ^10.1.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.2.0
+  connectivity_plus: ^7.1.1
 
   # Mobile BLE: uncomment when targeting Android/iOS with Dart-owned radio.
   # Requires BLE runtime permissions (declared in android/app/src/main/AndroidManifest.xml
