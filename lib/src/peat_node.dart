@@ -151,6 +151,44 @@ class PeatFlutterNode {
   /// List of currently connected peer node IDs.
   List<String> get connectedPeers => _node.connectedPeers();
 
+  /// Manually dial a peer by its endpoint info, bypassing mDNS discovery.
+  ///
+  /// Needed where raw-multicast mDNS can't run — notably a physical iOS device
+  /// without the (Apple-restricted) multicast entitlement: it can't *discover*
+  /// peers on the LAN, but it can still *dial* a known peer's [addresses]
+  /// (unicast QUIC, which iOS permits) and/or [relayUrl].
+  void connectPeer({
+    required String nodeId,
+    List<String> addresses = const [],
+    String? relayUrl,
+    String name = '',
+  }) {
+    _node.connectPeer(PeerInfo(
+      name: name,
+      nodeId: nodeId,
+      addresses: addresses,
+      relayUrl: relayUrl,
+    ));
+  }
+
+  /// Non-blocking variant of [connectPeer]: the dial runs on the native runtime
+  /// and this returns immediately. Use from the UI isolate (the blocking
+  /// [connectPeer] freezes the isolate for the whole dial — ~seconds for an
+  /// unreachable peer). On success the peer surfaces in [connectedPeers].
+  void connectPeerNowait({
+    required String nodeId,
+    List<String> addresses = const [],
+    String? relayUrl,
+    String name = '',
+  }) {
+    _node.connectPeerNowait(PeerInfo(
+      name: name,
+      nodeId: nodeId,
+      addresses: addresses,
+      relayUrl: relayUrl,
+    ));
+  }
+
   /// Current sync statistics (active, bytes sent/received).
   SyncStats get syncStats => _node.syncStats();
 
