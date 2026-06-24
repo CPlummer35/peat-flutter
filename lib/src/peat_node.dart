@@ -303,7 +303,9 @@ class PeatFlutterNode {
   List<PeerTransportState> peerTransportStates() {
     try {
       return _node.allPeerTransportStates();
-    } on PeatError {
+    } on PeatErrorException {
+      return const [];
+    } on StateError {
       return const [];
     }
   }

@@ -5,8 +5,9 @@
 // and the ChangeOrigin Dart surface.
 //
 // The binary FFI decode path (_uniffiReadChangeOrigin / _uniffiReadDocumentChange)
-// is covered by the native-linux-arm64 CI job, which links the real libpeat_ffi
-// and asserts the UniFFI-exported symbols are present and correct.
+// requires the native library and is exercised by the smoke_reconnect tool
+// (Local variant) and by real cross-peer sync (Remote variant). The
+// native-linux-arm64 CI job validates symbol presence but not decode round-trips.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:peat_flutter/peat_flutter.dart';
