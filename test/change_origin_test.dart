@@ -15,7 +15,7 @@ void main() {
   group('ChangeOrigin — JSON round-trip', () {
     const collection = 'test';
     const docId = 'doc-1';
-    const changeTypeStr = 'Updated';
+    const changeTypeStr = 'upsert';
 
     Map<String, dynamic> baseJson({String? origin}) => {
           'collection': collection,
