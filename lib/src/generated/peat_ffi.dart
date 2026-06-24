@@ -2523,18 +2523,6 @@ CommandInfo _uniffiDecodeCommandInfo(Uint8List bytes) {
   return value;
 }
 
-void _uniffiWriteDocumentChange(DocumentChange value, _UniFfiBinaryWriter writer) {
-  writer.writeString(value.collection);
-  writer.writeString(value.docId);
-  _uniffiWriteChangeType(value.changeType, writer);
-}
-
-Uint8List _uniffiEncodeDocumentChange(DocumentChange value) {
-  final writer = _UniFfiBinaryWriter();
-  _uniffiWriteDocumentChange(value, writer);
-  return writer.toBytes();
-}
-
 DocumentChange _uniffiReadDocumentChange(_UniFfiBinaryReader reader) {
   return DocumentChange(
     collection: reader.readString(),

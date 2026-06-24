@@ -10,6 +10,7 @@ export 'src/peat_node.dart'
         NodeConfig,
         TransportConfigFFI,
         DocumentChange,
+        ChangeOrigin,
         OutboundFrame,
         ChangeType,
         PeerInfo,
