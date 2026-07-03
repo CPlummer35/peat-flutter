@@ -9289,6 +9289,362 @@ class PeatFfiFfi {
       calloc.free(returnBuf);
     }
   }
+
+  // === Blob-transfer bindings ================================================
+  // Shared marshalling helpers so each blob invoke stays small: handle clone,
+  // String-arg encode, status decode, bare-String return decode, and cleanup —
+  // matching the inlined pattern the generated invokes use above.
+
+  int _cloneNodeHandle(int handle) {
+    final ffi.Pointer<_UniFfiRustCallStatus> cloneStatusPtr =
+        calloc<_UniFfiRustCallStatus>();
+    try {
+      cloneStatusPtr.ref.code = _uniFfiRustCallStatusSuccess;
+      cloneStatusPtr.ref.errorBuf
+        ..capacity = 0
+        ..len = 0
+        ..data = ffi.nullptr;
+      final int h = _peatNodeClone(handle, cloneStatusPtr);
+      if (cloneStatusPtr.ref.code != _uniFfiRustCallStatusSuccess) {
+        throw StateError(
+            'UniFFI clone failed with status ${cloneStatusPtr.ref.code}');
+      }
+      return h;
+    } finally {
+      calloc.free(cloneStatusPtr);
+    }
+  }
+
+  void _encodeStrArg(
+    ffi.Pointer<_UniFfiFfiBufferElement> argBuf,
+    int slot,
+    String value,
+    List<ffi.Pointer<ffi.Uint8>> foreignArgPtrs,
+    List<ffi.Pointer<_UniFfiRustBuffer>> rustRetBufferPtrs,
+  ) {
+    final Uint8List bytes = Uint8List.fromList(utf8.encode(value));
+    final ffi.Pointer<ffi.Uint8> ptr =
+        bytes.isEmpty ? ffi.nullptr : calloc<ffi.Uint8>(bytes.length);
+    if (bytes.isNotEmpty) {
+      ptr.asTypedList(bytes.length).setAll(0, bytes);
+    }
+    foreignArgPtrs.add(ptr);
+    final ffi.Pointer<_UniFfiRustCallStatus> statusPtr =
+        calloc<_UniFfiRustCallStatus>();
+    statusPtr.ref.code = _uniFfiRustCallStatusSuccess;
+    statusPtr.ref.errorBuf
+      ..capacity = 0
+      ..len = 0
+      ..data = ffi.nullptr;
+    final ffi.Pointer<_UniFfiForeignBytes> foreignPtr =
+        calloc<_UniFfiForeignBytes>();
+    foreignPtr.ref
+      ..len = bytes.length
+      ..data = ptr;
+    final _UniFfiRustBuffer rb =
+        _uniFfiRustBufferFromBytes(foreignPtr.ref, statusPtr);
+    calloc.free(foreignPtr);
+    final int code = statusPtr.ref.code;
+    final _UniFfiRustBuffer errBuf = statusPtr.ref.errorBuf;
+    calloc.free(statusPtr);
+    if (code != _uniFfiRustCallStatusSuccess) {
+      final ffi.Pointer<_UniFfiRustBuffer> errBufPtr = calloc<_UniFfiRustBuffer>();
+      errBufPtr.ref
+        ..capacity = errBuf.capacity
+        ..len = errBuf.len
+        ..data = errBuf.data;
+      rustRetBufferPtrs.add(errBufPtr);
+      throw StateError('UniFFI rustbuffer_from_bytes failed with status $code');
+    }
+    (argBuf + slot).ref.u64 = rb.capacity;
+    (argBuf + slot + 1).ref.u64 = rb.len;
+    (argBuf + slot + 2).ref.ptr = rb.data.cast<ffi.Void>();
+  }
+
+  void _checkFfiStatus(
+    ffi.Pointer<_UniFfiFfiBufferElement> returnBuf,
+    int statusSlot,
+    List<ffi.Pointer<_UniFfiRustBuffer>> rustRetBufferPtrs,
+  ) {
+    final int statusCode = (returnBuf + statusSlot).ref.i8;
+    if (statusCode == _uniFfiRustCallStatusSuccess) return;
+    final ffi.Pointer<_UniFfiRustBuffer> errBufPtr = calloc<_UniFfiRustBuffer>();
+    errBufPtr.ref
+      ..capacity = (returnBuf + statusSlot + 1).ref.u64
+      ..len = (returnBuf + statusSlot + 2).ref.u64
+      ..data = (returnBuf + statusSlot + 3).ref.ptr.cast<ffi.Uint8>();
+    rustRetBufferPtrs.add(errBufPtr);
+    if (statusCode == _uniFfiRustCallStatusError) {
+      final Uint8List errBytes = errBufPtr.ref.len == 0
+          ? Uint8List(0)
+          : Uint8List.fromList(errBufPtr.ref.data.asTypedList(errBufPtr.ref.len));
+      throw _uniffiLiftPeatErrorException(errBytes);
+    }
+    String panicMsg = '';
+    if (errBufPtr.ref.len > 0) {
+      final Uint8List rawErr =
+          Uint8List.fromList(errBufPtr.ref.data.asTypedList(errBufPtr.ref.len));
+      Uint8List bodyErr = rawErr;
+      if (rawErr.length >= 4) {
+        final int prefixLen =
+            (rawErr[0] << 24) | (rawErr[1] << 16) | (rawErr[2] << 8) | rawErr[3];
+        if (prefixLen == rawErr.length - 4) {
+          bodyErr = rawErr.sublist(4);
+        }
+      }
+      panicMsg = String.fromCharCodes(bodyErr);
+    }
+    throw StateError(
+        'UniFFI ffibuffer call failed with status $statusCode: $panicMsg');
+  }
+
+  String _decodeRbufString(
+    ffi.Pointer<_UniFfiFfiBufferElement> returnBuf,
+    List<ffi.Pointer<_UniFfiRustBuffer>> rustRetBufferPtrs,
+  ) {
+    final ffi.Pointer<_UniFfiRustBuffer> retBufPtr = calloc<_UniFfiRustBuffer>();
+    retBufPtr.ref
+      ..capacity = (returnBuf + 0).ref.u64
+      ..len = (returnBuf + 1).ref.u64
+      ..data = (returnBuf + 2).ref.ptr.cast<ffi.Uint8>();
+    rustRetBufferPtrs.add(retBufPtr);
+    final Uint8List retBytes = retBufPtr.ref.len == 0
+        ? Uint8List(0)
+        : Uint8List.fromList(retBufPtr.ref.data.asTypedList(retBufPtr.ref.len));
+    return utf8.decode(retBytes);
+  }
+
+  void _freeFfiCall(
+    ffi.Pointer<_UniFfiFfiBufferElement> argBuf,
+    ffi.Pointer<_UniFfiFfiBufferElement> returnBuf,
+    List<ffi.Pointer<ffi.Uint8>> foreignArgPtrs,
+    List<ffi.Pointer<_UniFfiRustBuffer>> rustRetBufferPtrs,
+  ) {
+    for (final ptr in foreignArgPtrs) {
+      if (ptr != ffi.nullptr) {
+        calloc.free(ptr);
+      }
+    }
+    for (final bufPtr in rustRetBufferPtrs) {
+      if (bufPtr.ref.data == ffi.nullptr &&
+          bufPtr.ref.len == 0 &&
+          bufPtr.ref.capacity == 0) {
+        continue;
+      }
+      final ffi.Pointer<_UniFfiRustCallStatus> freeStatusPtr =
+          calloc<_UniFfiRustCallStatus>();
+      freeStatusPtr.ref.code = _uniFfiRustCallStatusSuccess;
+      freeStatusPtr.ref.errorBuf
+        ..capacity = 0
+        ..len = 0
+        ..data = ffi.nullptr;
+      _uniFfiRustBufferFree(bufPtr.ref, freeStatusPtr);
+      calloc.free(freeStatusPtr);
+      calloc.free(bufPtr);
+    }
+    calloc.free(argBuf);
+    calloc.free(returnBuf);
+  }
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobEnableFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_enable');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobAddKnownPeerFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_add_known_peer');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobStorePathFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_path');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobFetchToPathFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_to_path');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobHasLocalFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_has_local');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobDeleteFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_delete');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobLocalEndpointIdFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_local_endpoint_id');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobLocalBoundAddrFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_local_bound_addr');
+
+  void peatNodeInvokeBlobEnable(int handle, String bindAddr) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, bindAddr, foreignArgPtrs, rustRetBufferPtrs);
+      _blobEnableFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  void peatNodeInvokeBlobAddKnownPeer(
+      int handle, String endpointIdHex, String address) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, endpointIdHex, foreignArgPtrs, rustRetBufferPtrs);
+      _encodeStrArg(argBuf, 4, address, foreignArgPtrs, rustRetBufferPtrs);
+      _blobAddKnownPeerFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  String peatNodeInvokeBlobStorePath(
+      int handle, String path, String contentType) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, path, foreignArgPtrs, rustRetBufferPtrs);
+      _encodeStrArg(argBuf, 4, contentType, foreignArgPtrs, rustRetBufferPtrs);
+      _blobStorePathFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 3, rustRetBufferPtrs);
+      return _decodeRbufString(returnBuf, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  void peatNodeInvokeBlobFetchToPath(
+      int handle, String hashHex, String destPath) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, hashHex, foreignArgPtrs, rustRetBufferPtrs);
+      _encodeStrArg(argBuf, 4, destPath, foreignArgPtrs, rustRetBufferPtrs);
+      _blobFetchToPathFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  bool peatNodeInvokeBlobHasLocal(int handle, String hashHex) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(5);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, hashHex, foreignArgPtrs, rustRetBufferPtrs);
+      _blobHasLocalFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 1, rustRetBufferPtrs);
+      return (returnBuf + 0).ref.i8 != 0;
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  void peatNodeInvokeBlobDelete(int handle, String hashHex) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, hashHex, foreignArgPtrs, rustRetBufferPtrs);
+      _blobDeleteFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  String peatNodeInvokeBlobLocalEndpointId(int handle) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(1);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _blobLocalEndpointIdFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 3, rustRetBufferPtrs);
+      return _decodeRbufString(returnBuf, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  String peatNodeInvokeBlobLocalBoundAddr(int handle) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(1);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _blobLocalBoundAddrFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 3, rustRetBufferPtrs);
+      return _decodeRbufString(returnBuf, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
 }
 
 final class _PeatNodeFinalizerToken {
@@ -9435,6 +9791,60 @@ final class PeatNode {
   String endpointAddr() {
     _ensureOpen();
     return _ffi.peatNodeInvokeEndpointAddr(_handle);
+  }
+
+  // --- Blob transfer ---------------------------------------------------------
+
+  /// Enable the parallel blob-transfer endpoint. Empty [bindAddr] = default;
+  /// otherwise an "ip:port" to bind. Call once before any blob op.
+  void blobEnable([String bindAddr = '']) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeBlobEnable(_handle, bindAddr);
+  }
+
+  /// Register a known blob peer (its endpoint id hex + "ip:port" address) so
+  /// this node can fetch blobs from it.
+  void blobAddKnownPeer(String endpointIdHex, String address) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeBlobAddKnownPeer(_handle, endpointIdHex, address);
+  }
+
+  /// Add a file from disk to the local blob store (streamed). Returns its
+  /// content hash (hex).
+  String blobStorePath(String path, String contentType) {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobStorePath(_handle, path, contentType);
+  }
+
+  /// Fetch a blob by hash, writing it to [destPath] (streamed). Tries local
+  /// first, then known peers.
+  void blobFetchToPath(String hashHex, String destPath) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeBlobFetchToPath(_handle, hashHex, destPath);
+  }
+
+  /// True if the blob is present locally (no network fetch).
+  bool blobHasLocal(String hashHex) {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobHasLocal(_handle, hashHex);
+  }
+
+  /// Remove a local blob by hash.
+  void blobDelete(String hashHex) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeBlobDelete(_handle, hashHex);
+  }
+
+  /// This node's blob endpoint id (hex), or "" if blob transfer is off.
+  String blobLocalEndpointId() {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobLocalEndpointId(_handle);
+  }
+
+  /// This node's blob endpoint bound address ("ip:port"), or "" if off.
+  String blobLocalBoundAddr() {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobLocalBoundAddr(_handle);
   }
 
   /// Return this node's iroh-endpoint first IP listening address

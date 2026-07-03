@@ -39,6 +39,14 @@ check-bindings:
         uniffi_ffibuffer_peat_ffi_fn_func_create_node \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_subscribe_poll \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_request_sync \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_enable \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_add_known_peer \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_path \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_to_path \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_has_local \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_delete \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_local_endpoint_id \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_local_bound_addr \
         ffi_uniffi_peat_ffi_rustbuffer_from_bytes \
         ffi_peat_ffi_uniffi_contract_version; do
         if ! nm "$lib" 2>/dev/null | grep -q "_${sym}"; then
