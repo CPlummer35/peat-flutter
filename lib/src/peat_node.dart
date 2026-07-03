@@ -103,6 +103,35 @@ class PeatFlutterNode {
     try { return _node.endpointSocketAddr(); } catch (_) { return null; }
   }
 
+  // --- Blob transfer (large-file, anchor-hosted, fetch-on-demand) -----------
+
+  /// Enable the parallel blob-transfer endpoint. Call once before any blob op.
+  void blobEnable([String bindAddr = '']) => _node.blobEnable(bindAddr);
+
+  /// Register a known blob peer (endpoint id hex + "ip:port") to fetch from.
+  void blobAddKnownPeer(String endpointIdHex, String address) =>
+      _node.blobAddKnownPeer(endpointIdHex, address);
+
+  /// Add a file from disk to the local blob store (streamed); returns its hash.
+  String blobStorePath(String path, String contentType) =>
+      _node.blobStorePath(path, contentType);
+
+  /// Fetch a blob by hash, writing it to [destPath] (streamed).
+  void blobFetchToPath(String hashHex, String destPath) =>
+      _node.blobFetchToPath(hashHex, destPath);
+
+  /// True if the blob is present locally (no network fetch).
+  bool blobHasLocal(String hashHex) => _node.blobHasLocal(hashHex);
+
+  /// Remove a local blob by hash.
+  void blobDelete(String hashHex) => _node.blobDelete(hashHex);
+
+  /// This node's blob endpoint id (hex), or '' if blob transfer is off.
+  String get blobEndpointId => _node.blobLocalEndpointId();
+
+  /// This node's blob endpoint bound address ("ip:port"), or '' if off.
+  String get blobBoundAddr => _node.blobLocalBoundAddr();
+
   /// Publish this node's presence with capabilities into the mesh.
   /// Other nodes will see it via [getNodes].
   void publishSelf({
