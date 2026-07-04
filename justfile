@@ -45,6 +45,9 @@ check-bindings:
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_start \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_status \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_dispose \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_start \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_status \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_dispose \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_path \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_to_path \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_has_local \

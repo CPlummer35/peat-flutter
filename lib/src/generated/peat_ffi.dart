@@ -9502,6 +9502,33 @@ class PeatFfiFfi {
 
   late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
           ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobStoreStartFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_start');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobStoreStatusFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_status');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobStoreDisposeFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_dispose');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
       _blobStorePathFfiBuffer = _lib.lookupFunction<
           ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
               ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
@@ -9644,6 +9671,55 @@ class PeatFfiFfi {
       (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
       (argBuf + 1).ref.u64 = fetchId;
       _blobFetchDisposeFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  int peatNodeInvokeBlobStoreStart(
+      int handle, String path, String contentType) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(5);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, path, foreignArgPtrs, rustRetBufferPtrs);
+      _encodeStrArg(argBuf, 4, contentType, foreignArgPtrs, rustRetBufferPtrs);
+      _blobStoreStartFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 1, rustRetBufferPtrs);
+      return (returnBuf + 0).ref.u64;
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  String peatNodeInvokeBlobStoreStatus(int handle, int storeId) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(2);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      (argBuf + 1).ref.u64 = storeId;
+      _blobStoreStatusFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 3, rustRetBufferPtrs);
+      return _decodeRbufString(returnBuf, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  void peatNodeInvokeBlobStoreDispose(int handle, int storeId) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(2);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      (argBuf + 1).ref.u64 = storeId;
+      _blobStoreDisposeFfiBuffer(argBuf, returnBuf);
       _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
     } finally {
       _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
@@ -9933,6 +10009,25 @@ final class PeatNode {
   void blobFetchDispose(int fetchId) {
     _ensureOpen();
     _ffi.peatNodeInvokeBlobFetchDispose(_handle, fetchId);
+  }
+
+  /// Start an async store of a file into the blob store (non-blocking); returns
+  /// a store id to poll with [blobStoreStatus].
+  int blobStoreStart(String path, String contentType) {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobStoreStart(_handle, path, contentType);
+  }
+
+  /// Poll an async store — "done|hash|error" (done = 0/1).
+  String blobStoreStatus(int storeId) {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobStoreStatus(_handle, storeId);
+  }
+
+  /// Drop an async store's tracking state (call once done/consumed).
+  void blobStoreDispose(int storeId) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeBlobStoreDispose(_handle, storeId);
   }
 
   /// Add a file from disk to the local blob store (streamed). Returns its

@@ -156,6 +156,33 @@ class PeatFlutterNode {
     }
   }
 
+  /// Store a file into the blob store, returning its content hash. The
+  /// hash+import runs off-thread (the UI stays responsive); this just polls to
+  /// completion. Throws on error.
+  Future<String> blobStore(
+    String path,
+    String contentType, {
+    Duration poll = const Duration(milliseconds: 200),
+  }) async {
+    final id = _node.blobStoreStart(path, contentType);
+    try {
+      while (true) {
+        await Future<void>.delayed(poll);
+        final parts = _node.blobStoreStatus(id).split('|');
+        final done = parts.isNotEmpty && parts[0] == '1';
+        if (done) {
+          final hash = parts.length > 1 ? parts[1] : '';
+          final error = parts.length > 2 ? parts.sublist(2).join('|') : '';
+          if (error.isNotEmpty) throw Exception(error);
+          if (hash.isEmpty) throw Exception('store produced no hash');
+          return hash;
+        }
+      }
+    } finally {
+      _node.blobStoreDispose(id);
+    }
+  }
+
   /// Add a file from disk to the local blob store (streamed); returns its hash.
   String blobStorePath(String path, String contentType) =>
       _node.blobStorePath(path, contentType);
