@@ -112,6 +112,50 @@ class PeatFlutterNode {
   void blobAddKnownPeer(String endpointIdHex, String address) =>
       _node.blobAddKnownPeer(endpointIdHex, address);
 
+  /// Register a known blob peer by endpoint id only — relay/DNS discovery
+  /// resolves the address (works across networks/NAT).
+  void blobAddKnownPeerById(String endpointIdHex) =>
+      _node.blobAddKnownPeerById(endpointIdHex);
+
+  /// Start an async blob fetch (non-blocking); returns a fetch id.
+  int blobFetchStart(String hashHex, String destPath) =>
+      _node.blobFetchStart(hashHex, destPath);
+
+  /// Poll an async fetch: "done|downloaded|total|error".
+  String blobFetchStatus(int fetchId) => _node.blobFetchStatus(fetchId);
+
+  /// Drop an async fetch's tracking state.
+  void blobFetchDispose(int fetchId) => _node.blobFetchDispose(fetchId);
+
+  /// Fetch a blob by hash into [destPath], yielding progress fraction (0..1)
+  /// until complete. The transfer runs off-thread (the UI stays responsive);
+  /// this just polls status. Throws on transfer error.
+  Stream<double> blobDownload(
+    String hashHex,
+    String destPath, {
+    Duration poll = const Duration(milliseconds: 250),
+  }) async* {
+    final id = _node.blobFetchStart(hashHex, destPath);
+    try {
+      while (true) {
+        await Future<void>.delayed(poll);
+        final parts = _node.blobFetchStatus(id).split('|');
+        final done = parts.isNotEmpty && parts[0] == '1';
+        final downloaded = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+        final total = parts.length > 2 ? (int.tryParse(parts[2]) ?? 0) : 0;
+        final error = parts.length > 3 ? parts.sublist(3).join('|') : '';
+        if (total > 0) yield (downloaded / total).clamp(0.0, 1.0);
+        if (done) {
+          if (error.isNotEmpty) throw Exception(error);
+          yield 1.0;
+          return;
+        }
+      }
+    } finally {
+      _node.blobFetchDispose(id);
+    }
+  }
+
   /// Add a file from disk to the local blob store (streamed); returns its hash.
   String blobStorePath(String path, String contentType) =>
       _node.blobStorePath(path, contentType);

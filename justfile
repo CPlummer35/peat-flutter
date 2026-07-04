@@ -41,6 +41,10 @@ check-bindings:
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_request_sync \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_enable \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_add_known_peer \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_add_known_peer_by_id \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_start \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_status \
+        uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_dispose \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_store_path \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_to_path \
         uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_has_local \

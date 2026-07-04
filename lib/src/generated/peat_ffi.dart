@@ -9466,6 +9466,42 @@ class PeatFfiFfi {
 
   late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
           ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobAddKnownPeerByIdFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_add_known_peer_by_id');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobFetchStartFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_start');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobFetchStatusFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_status');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
+      _blobFetchDisposeFfiBuffer = _lib.lookupFunction<
+          ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
+          void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+              ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)>(
+      'uniffi_ffibuffer_peat_ffi_fn_method_peatnode_blob_fetch_dispose');
+
+  late final void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
+          ffi.Pointer<_UniFfiFfiBufferElement> returnPtr)
       _blobStorePathFfiBuffer = _lib.lookupFunction<
           ffi.Void Function(ffi.Pointer<_UniFfiFfiBufferElement> argPtr,
               ffi.Pointer<_UniFfiFfiBufferElement> returnPtr),
@@ -9544,6 +9580,70 @@ class PeatFfiFfi {
       _encodeStrArg(argBuf, 1, endpointIdHex, foreignArgPtrs, rustRetBufferPtrs);
       _encodeStrArg(argBuf, 4, address, foreignArgPtrs, rustRetBufferPtrs);
       _blobAddKnownPeerFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  void peatNodeInvokeBlobAddKnownPeerById(int handle, String endpointIdHex) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, endpointIdHex, foreignArgPtrs, rustRetBufferPtrs);
+      _blobAddKnownPeerByIdFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  int peatNodeInvokeBlobFetchStart(
+      int handle, String hashHex, String destPath) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(5);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      _encodeStrArg(argBuf, 1, hashHex, foreignArgPtrs, rustRetBufferPtrs);
+      _encodeStrArg(argBuf, 4, destPath, foreignArgPtrs, rustRetBufferPtrs);
+      _blobFetchStartFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 1, rustRetBufferPtrs);
+      return (returnBuf + 0).ref.u64;
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  String peatNodeInvokeBlobFetchStatus(int handle, int fetchId) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(2);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(7);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      (argBuf + 1).ref.u64 = fetchId;
+      _blobFetchStatusFfiBuffer(argBuf, returnBuf);
+      _checkFfiStatus(returnBuf, 3, rustRetBufferPtrs);
+      return _decodeRbufString(returnBuf, rustRetBufferPtrs);
+    } finally {
+      _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
+    }
+  }
+
+  void peatNodeInvokeBlobFetchDispose(int handle, int fetchId) {
+    final argBuf = calloc<_UniFfiFfiBufferElement>(2);
+    final returnBuf = calloc<_UniFfiFfiBufferElement>(4);
+    final foreignArgPtrs = <ffi.Pointer<ffi.Uint8>>[];
+    final rustRetBufferPtrs = <ffi.Pointer<_UniFfiRustBuffer>>[];
+    try {
+      (argBuf + 0).ref.u64 = _cloneNodeHandle(handle);
+      (argBuf + 1).ref.u64 = fetchId;
+      _blobFetchDisposeFfiBuffer(argBuf, returnBuf);
       _checkFfiStatus(returnBuf, 0, rustRetBufferPtrs);
     } finally {
       _freeFfiCall(argBuf, returnBuf, foreignArgPtrs, rustRetBufferPtrs);
@@ -9807,6 +9907,32 @@ final class PeatNode {
   void blobAddKnownPeer(String endpointIdHex, String address) {
     _ensureOpen();
     _ffi.peatNodeInvokeBlobAddKnownPeer(_handle, endpointIdHex, address);
+  }
+
+  /// Register a known blob peer by endpoint id only — relay/DNS discovery
+  /// resolves the address, so it works across networks/NAT.
+  void blobAddKnownPeerById(String endpointIdHex) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeBlobAddKnownPeerById(_handle, endpointIdHex);
+  }
+
+  /// Start an async fetch of a blob by hash into [destPath] (non-blocking).
+  /// Returns a fetch id to poll with [blobFetchStatus].
+  int blobFetchStart(String hashHex, String destPath) {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobFetchStart(_handle, hashHex, destPath);
+  }
+
+  /// Poll an async fetch — "done|downloaded|total|error" (done = 0/1).
+  String blobFetchStatus(int fetchId) {
+    _ensureOpen();
+    return _ffi.peatNodeInvokeBlobFetchStatus(_handle, fetchId);
+  }
+
+  /// Drop an async fetch's tracking state (call once done/consumed).
+  void blobFetchDispose(int fetchId) {
+    _ensureOpen();
+    _ffi.peatNodeInvokeBlobFetchDispose(_handle, fetchId);
   }
 
   /// Add a file from disk to the local blob store (streamed). Returns its
